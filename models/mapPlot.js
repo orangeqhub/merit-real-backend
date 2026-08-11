@@ -1,0 +1,48 @@
+'use strict';
+
+const { Model } = require('sequelize');
+
+module.exports = (sequelize, DataTypes) => {
+  class MapPlot extends Model {
+    static associate(models) {
+      MapPlot.belongsTo(models.Property, { foreignKey: 'propertyId', as: 'property' });
+      MapPlot.belongsTo(models.User, { foreignKey: 'customerId', as: 'customer' });
+    }
+  }
+
+  MapPlot.init({
+    externalId: {
+      type: DataTypes.STRING(100),
+      allowNull: false,
+      unique: true,
+    },
+    plotNo: {
+      type: DataTypes.STRING(50),
+      allowNull: false,
+    },
+    propertyId: DataTypes.INTEGER,
+    customerName: DataTypes.STRING(150),
+    customerId: DataTypes.INTEGER,
+    plotArea: DataTypes.DECIMAL(12, 2),
+    facing: DataTypes.STRING(50),
+    status: {
+      type: DataTypes.ENUM('available', 'booked', 'registered', 'sold'),
+      allowNull: false,
+      defaultValue: 'available',
+    },
+    remarks: DataTypes.TEXT,
+    plotCost: DataTypes.DECIMAL(14, 2),
+    sizeEast: DataTypes.DECIMAL(12, 2),
+    sizeWest: DataTypes.DECIMAL(12, 2),
+    sizeNorth: DataTypes.DECIMAL(12, 2),
+    sizeSouth: DataTypes.DECIMAL(12, 2),
+    bookingRequestId: DataTypes.INTEGER,
+    bookedAt: DataTypes.DATE,
+  }, {
+    sequelize,
+    modelName: 'MapPlot',
+    tableName: 'MapPlots',
+  });
+
+  return MapPlot;
+};

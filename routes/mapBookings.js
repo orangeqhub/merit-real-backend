@@ -1,0 +1,42 @@
+'use strict';
+
+const express = require('express');
+const mapBookingController = require('../controllers/mapBookingController');
+const authenticate = require('../middleware/auth');
+const authorizeRoles = require('../middleware/authorize');
+const { ROLES } = require('../constants/roles');
+
+const router = express.Router();
+
+router.get('/plots', (req, res, next) => mapBookingController.list(req, res, next));
+router.get('/plots/:id', (req, res, next) => mapBookingController.getById(req, res, next));
+
+router.post(
+  '/plots/seed',
+  authenticate,
+  authorizeRoles(ROLES.ADMIN),
+  (req, res, next) => mapBookingController.seed(req, res, next)
+);
+
+router.post(
+  '/plots',
+  authenticate,
+  authorizeRoles(ROLES.ADMIN, ROLES.SALES_MEMBER),
+  (req, res, next) => mapBookingController.upsert(req, res, next)
+);
+
+router.post(
+  '/plots/:id/book',
+  authenticate,
+  authorizeRoles(ROLES.ADMIN, ROLES.SALES_MEMBER, ROLES.CUSTOMER, ROLES.AGENT),
+  (req, res, next) => mapBookingController.book(req, res, next)
+);
+
+router.patch(
+  '/plots/:id/status',
+  authenticate,
+  authorizeRoles(ROLES.ADMIN, ROLES.SALES_MEMBER),
+  (req, res, next) => mapBookingController.updateStatus(req, res, next)
+);
+
+module.exports = router;
