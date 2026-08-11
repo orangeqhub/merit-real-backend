@@ -19,10 +19,24 @@ router.post(
 );
 
 router.post(
+  '/plots/pricing/bulk',
+  authenticate,
+  authorizeRoles(ROLES.ADMIN, ROLES.SALES_MEMBER),
+  (req, res, next) => mapBookingController.bulkPricing(req, res, next)
+);
+
+router.post(
   '/plots',
   authenticate,
   authorizeRoles(ROLES.ADMIN, ROLES.SALES_MEMBER),
   (req, res, next) => mapBookingController.upsert(req, res, next)
+);
+
+router.patch(
+  '/plots/:id/pricing',
+  authenticate,
+  authorizeRoles(ROLES.ADMIN, ROLES.SALES_MEMBER),
+  (req, res, next) => mapBookingController.updatePricing(req, res, next)
 );
 
 router.post(

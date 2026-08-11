@@ -57,6 +57,27 @@ class MapBookingController {
       return next(error);
     }
   }
+
+  async updatePricing(req, res, next) {
+    try {
+      const data = await mapBookingService.updatePricing({
+        ...req.body,
+        id: req.params.id || req.body.id,
+      });
+      return res.json({ success: true, message: 'Plot pricing updated.', data, errors: [] });
+    } catch (error) {
+      return next(error);
+    }
+  }
+
+  async bulkPricing(req, res, next) {
+    try {
+      const data = await mapBookingService.bulkPricing(req.body || {});
+      return res.json({ success: true, message: 'Plot pricing bulk updated.', data, errors: [] });
+    } catch (error) {
+      return next(error);
+    }
+  }
 }
 
 module.exports = new MapBookingController();

@@ -32,8 +32,73 @@ function formatPlot(row) {
   };
 }
 
+function plotNoKey(plotNo) {
+  return String(plotNo || '').trim().toLowerCase();
+}
+
+function plotNoNumeric(plotNo) {
+  const n = Number(String(plotNo || '').replace(/[^\d.]/g, ''));
+  return Number.isFinite(n) ? n : Number.POSITIVE_INFINITY;
+}
+
+function statusRank(status) {
+  const key = String(status || '').toLowerCase();
+  if (key === 'sold') return 0;
+  if (key === 'registered') return 1;
+  if (key === 'booked') return 2;
+  return 3;
+}
+
+/** Prefer booked/sold, priced, and smaller-area rows when collapsing duplicates. */
+function preferPlot(a, b) {
+  const byStatus = statusRank(a.status) - statusRank(b.status);
+  if (byStatus !== 0) return byStatus < 0 ? a : b;
+
+  const aPriced = a.plotCost != null && Number(a.plotCost) > 0 ? 0 : 1;
+  const bPriced = b.plotCost != null && Number(b.plotCost) > 0 ? 0 : 1;
+  if (aPriced !== bPriced) return aPriced < bPriced ? a : b;
+
+  const aArea = a.plotArea != null ? Number(a.plotArea) : Number.POSITIVE_INFINITY;
+  const bArea = b.plotArea != null ? Number(b.plotArea) : Number.POSITIVE_INFINITY;
+  if (aArea !== bArea) return aArea < bArea ? a : b;
+
+  return Number(a.id || 0) <= Number(b.id || 0) ? a : b;
+}
+
+function dedupeByPlotNo(items) {
+  const map = new Map();
+  for (const item of items) {
+    const key = plotNoKey(item.plotNo);
+    if (!key) continue;
+    const existing = map.get(key);
+    map.set(key, existing ? preferPlot(existing, item) : item);
+  }
+  return Array.from(map.values()).sort((a, b) => {
+    const diff = plotNoNumeric(a.plotNo) - plotNoNumeric(b.plotNo);
+    if (diff !== 0) return diff;
+    return String(a.plotNo).localeCompare(String(b.plotNo));
+  });
+}
+
+function numericPlotNoOrder() {
+  return [
+    [
+      sequelize.literal(
+        `CAST(NULLIF(regexp_replace("MapPlot"."plotNo", '[^0-9]', '', 'g'), '') AS INTEGER)`
+      ),
+      'ASC NULLS LAST',
+    ],
+    ['plotNo', 'ASC'],
+    ['id', 'ASC'],
+  ];
+}
+
+function truthyFlag(value) {
+  return value === true || value === 1 || value === '1' || String(value).toLowerCase() === 'true';
+}
+
 class MapBookingService {
-  async list({ status, propertyId, search, page = 1, pageSize = 100 } = {}) {
+  async list({ status, propertyId, search, page = 1, pageSize = 100, unique = false } = {}) {
     const where = {};
     if (status) where.status = String(status).toLowerCase();
     if (propertyId) where.propertyId = Number(propertyId);
@@ -47,21 +112,21 @@ class MapBookingService {
 
     const limit = Math.min(Math.max(Number(pageSize) || 100, 1), 500);
     const offset = (Math.max(Number(page) || 1, 1) - 1) * limit;
+    const include = [{ model: Property, as: 'property', attributes: ['id', 'titleEn', 'status'] }];
+    const order = numericPlotNoOrder();
+    const uniqueOnly = truthyFlag(unique);
 
-    const { rows, count } = await MapPlot.findAndCountAll({
-      where,
-      include: [{ model: Property, as: 'property', attributes: ['id', 'titleEn', 'status'] }],
-      order: [['plotNo', 'ASC']],
-      limit,
-      offset,
-    });
+    const rows = await MapPlot.findAll({ where, include, order });
+    let items = rows.map(formatPlot);
+    if (uniqueOnly) items = dedupeByPlotNo(items);
 
+    const total = items.length;
     return {
-      items: rows.map(formatPlot),
-      total: count,
+      items: items.slice(offset, offset + limit),
+      total,
       page: Math.max(Number(page) || 1, 1),
       pageSize: limit,
-      totalPages: Math.max(1, Math.ceil(count / limit)),
+      totalPages: Math.max(1, Math.ceil(total / limit) || 1),
     };
   }
 
@@ -224,6 +289,125 @@ class MapBookingService {
       else created += 1;
     }
     return { created, updated, total: created + updated };
+  }
+
+  /**
+   * Update pricing/details. Updates all rows sharing the same plotNo
+   * so duplicate map geometries stay in sync.
+   */
+  async updatePricing(payload = {}) {
+    const rawId = payload.id != null ? String(payload.id).trim() : '';
+    const externalId = payload.externalId != null ? String(payload.externalId).trim() : '';
+    const plotNoInput = payload.plotNo != null ? String(payload.plotNo).trim() : '';
+
+    let seedRow = null;
+    if (/^\d+$/.test(rawId)) {
+      seedRow = await MapPlot.findByPk(Number(rawId));
+    } else if (rawId) {
+      seedRow = await MapPlot.findOne({ where: { externalId: rawId } });
+      if (!seedRow) {
+        const byPlotNo = await MapPlot.findAll({ where: { plotNo: rawId } });
+        seedRow = byPlotNo[0] || null;
+      }
+    } else if (externalId) {
+      seedRow = await MapPlot.findOne({ where: { externalId } });
+    } else if (plotNoInput) {
+      const byPlotNo = await MapPlot.findAll({ where: { plotNo: plotNoInput } });
+      seedRow = byPlotNo[0] || null;
+    } else {
+      const err = new Error('id, externalId, or plotNo is required.');
+      err.status = 400;
+      throw err;
+    }
+
+    if (!seedRow) {
+      const err = new Error('Plot not found.');
+      err.status = 404;
+      err.code = 'PLOT_NOT_FOUND';
+      throw err;
+    }
+
+    const plotNo = plotNoInput || seedRow.plotNo;
+    const rows = await MapPlot.findAll({ where: { plotNo } });
+
+    const updates = {};
+    if (payload.plotCost !== undefined) {
+      updates.plotCost =
+        payload.plotCost === null || payload.plotCost === ''
+          ? null
+          : Number(payload.plotCost);
+    }
+    if (payload.facing !== undefined) updates.facing = payload.facing || null;
+    if (payload.remarks !== undefined) updates.remarks = payload.remarks || null;
+    if (payload.plotArea !== undefined) {
+      updates.plotArea =
+        payload.plotArea === null || payload.plotArea === ''
+          ? null
+          : Number(payload.plotArea);
+    }
+    if (payload.status !== undefined) {
+      const nextStatus = String(payload.status || '').toLowerCase();
+      if (['available', 'booked', 'registered', 'sold'].includes(nextStatus)) {
+        updates.status = nextStatus;
+      }
+    }
+
+    for (const row of rows) {
+      await row.update(updates);
+    }
+
+    return {
+      updated: rows.length,
+      plotNo,
+      items: await Promise.all(rows.map((row) => this.getById(row.id))),
+    };
+  }
+
+  /**
+   * Bulk set prices. Supports:
+   * - items: [{ plotNo|externalId|id, plotCost }, ...]
+   * - ratePerSqYd: number (cost = area * rate), optional onlyEmpty
+   * - plotCost + plotNos: apply same cost to many plot numbers
+   */
+  async bulkPricing(payload = {}) {
+    let updated = 0;
+    const results = [];
+
+    if (Array.isArray(payload.items) && payload.items.length) {
+      for (const item of payload.items) {
+        const result = await this.updatePricing(item);
+        updated += result.updated;
+        results.push(result);
+      }
+      return { updated, results };
+    }
+
+    if (payload.plotCost !== undefined && Array.isArray(payload.plotNos) && payload.plotNos.length) {
+      for (const plotNo of payload.plotNos) {
+        const result = await this.updatePricing({ plotNo, plotCost: payload.plotCost });
+        updated += result.updated;
+        results.push(result);
+      }
+      return { updated, results };
+    }
+
+    const rate = Number(payload.ratePerSqYd);
+    if (Number.isFinite(rate) && rate >= 0) {
+      const onlyEmpty = truthyFlag(payload.onlyEmpty);
+      const rows = await MapPlot.findAll();
+      for (const row of rows) {
+        if (onlyEmpty && row.plotCost != null && Number(row.plotCost) > 0) continue;
+        const area = Number(row.plotArea) || 0;
+        const plotCost = Math.round(area * rate * 100) / 100;
+        await row.update({ plotCost });
+        updated += 1;
+      }
+      return { updated, ratePerSqYd: rate, onlyEmpty };
+    }
+
+    const err = new Error('Provide items, plotNos+plotCost, or ratePerSqYd.');
+    err.status = 400;
+    throw err;
   }
 }
 
