@@ -34,7 +34,12 @@ class PropertyController {
   async getFeatured(req, res, next) {
     try {
       const limit = Number(req.query.limit) || 8;
-      const data = await propertyService.getFeatured(limit, req.query.location, req);
+      const geo = {
+        latitude: req.query.latitude,
+        longitude: req.query.longitude,
+        radiusKm: req.query.radiusKm,
+      };
+      const data = await propertyService.getFeatured(limit, req.query.location, req, geo);
       return res.json({
         success: true,
         message: 'Featured properties fetched.',
@@ -49,7 +54,12 @@ class PropertyController {
   async getLatest(req, res, next) {
     try {
       const limit = Number(req.query.limit) || 8;
-      const data = await propertyService.getLatest(limit, req.query.location, req);
+      const geo = {
+        latitude: req.query.latitude,
+        longitude: req.query.longitude,
+        radiusKm: req.query.radiusKm,
+      };
+      const data = await propertyService.getLatest(limit, req.query.location, req, geo);
       return res.json({
         success: true,
         message: 'Latest properties fetched.',
@@ -64,7 +74,12 @@ class PropertyController {
   async getTrending(req, res, next) {
     try {
       const limit = Number(req.query.limit) || 8;
-      const data = await propertyService.getTrending(limit, req.query.location, req);
+      const geo = {
+        latitude: req.query.latitude,
+        longitude: req.query.longitude,
+        radiusKm: req.query.radiusKm,
+      };
+      const data = await propertyService.getTrending(limit, req.query.location, req, geo);
       return res.json({
         success: true,
         message: 'Trending properties fetched.',

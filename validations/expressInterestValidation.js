@@ -3,7 +3,21 @@
 const { body, param, query } = require('express-validator');
 
 const submitRules = [
-  body('propertyId').isInt({ min: 1 }).withMessage('Valid propertyId is required'),
+  body().custom((_, { req }) => {
+    const hasProperty = Number(req.body?.propertyId) > 0;
+    const hasPlot = String(
+      req.body?.mapPlotExternalId || req.body?.mapPlotId || req.body?.externalId || req.body?.plotId || ''
+    ).trim();
+    if (!hasProperty && !hasPlot) {
+      throw new Error('propertyId or mapPlotExternalId is required');
+    }
+    return true;
+  }),
+  body('propertyId').optional({ nullable: true, checkFalsy: true }).isInt({ min: 1 }).withMessage('Valid propertyId is required'),
+  body('mapPlotExternalId').optional({ nullable: true }).isString().trim().isLength({ max: 100 }),
+  body('mapPlotId').optional({ nullable: true, checkFalsy: true }).isInt({ min: 1 }),
+  body('externalId').optional({ nullable: true }).isString().trim().isLength({ max: 100 }),
+  body('plotId').optional({ nullable: true }).isString().trim().isLength({ max: 100 }),
   body('remarks').optional({ nullable: true }).isString().isLength({ max: 2000 }),
   body('message').optional({ nullable: true }).isString().isLength({ max: 2000 }),
   body('referralAgentCode').optional({ nullable: true }).isString().trim().isLength({ max: 64 }),

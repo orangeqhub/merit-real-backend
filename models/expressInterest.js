@@ -21,6 +21,7 @@ module.exports = (sequelize, DataTypes) => {
       ExpressInterest.belongsTo(models.User, { foreignKey: 'assignedEmployeeId', as: 'assignedEmployee' });
       ExpressInterest.belongsTo(models.User, { foreignKey: 'approvedById', as: 'approvedBy' });
       ExpressInterest.belongsTo(models.Property, { foreignKey: 'propertyId', as: 'property' });
+      ExpressInterest.belongsTo(models.MapPlot, { foreignKey: 'mapPlotId', as: 'mapPlot' });
       ExpressInterest.hasMany(models.ExpressInterestHistory, { foreignKey: 'interestId', as: 'history' });
       ExpressInterest.hasMany(models.FollowUpRemark, { foreignKey: 'interestId', as: 'followUps' });
       ExpressInterest.hasMany(models.CallNote, { foreignKey: 'interestId', as: 'callNotes' });
@@ -35,6 +36,10 @@ module.exports = (sequelize, DataTypes) => {
   ExpressInterest.init({
     customerId: { type: DataTypes.INTEGER, allowNull: false },
     propertyId: { type: DataTypes.INTEGER, allowNull: false },
+    mapPlotId: DataTypes.INTEGER,
+    mapPlotExternalId: DataTypes.STRING(100),
+    mapPlotNo: DataTypes.STRING(50),
+    mapPhase: DataTypes.SMALLINT,
     referralAgentId: DataTypes.INTEGER,
     assignedAgentId: DataTypes.INTEGER,
     assignedEmployeeId: DataTypes.INTEGER,

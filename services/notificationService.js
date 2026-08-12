@@ -45,8 +45,16 @@ class NotificationService {
     linkPath = null,
     imageUrl = null,
     createdBy = null,
+    allowSelfNotification = false,
   }) {
     if (!userId) return null;
+    if (
+      !allowSelfNotification
+      && createdBy
+      && Number(createdBy) === Number(userId)
+    ) {
+      return null;
+    }
     const row = await Notification.create({
       userId,
       userRole: userRole || 'CUSTOMER',
@@ -72,13 +80,17 @@ class NotificationService {
     return formatted;
   }
 
-  async notifyByRole(role, payload) {
+  async notifyByRole(role, payload, options = {}) {
+    const exclude = new Set((options.excludeUserIds || []).map(Number).filter(Boolean));
+    if (payload.createdBy) exclude.add(Number(payload.createdBy));
+
     const users = await User.findAll({
       where: { role, status: 'ACTIVE' },
       attributes: ['id', 'role'],
     });
     const results = [];
     for (const user of users) {
+      if (exclude.has(user.id)) continue;
       results.push(await this.create({
         ...payload,
         userId: user.id,
@@ -90,15 +102,18 @@ class NotificationService {
 
   async notifyAdmins(payload, options = {}) {
     const { includeSalesMembers = true } = options;
-    const results = await this.notifyByRole(ROLES.ADMIN, payload);
+    const excludeUserIds = [...(options.excludeUserIds || [])];
+    if (payload.createdBy) excludeUserIds.push(payload.createdBy);
+
+    const results = await this.notifyByRole(ROLES.ADMIN, payload, { excludeUserIds });
     if (includeSalesMembers) {
-      const salesResults = await this.notifySalesMembers(payload);
+      const salesResults = await this.notifySalesMembers(payload, { excludeUserIds });
       return results.concat(salesResults);
     }
     return results;
   }
 
-  async notifySalesMembers(payload) {
+  async notifySalesMembers(payload, options = {}) {
     let linkPath = payload.linkPath || '/sales/dashboard';
     const adminToSales = {
       '/admin/registrations': '/sales/dashboard',
@@ -120,16 +135,20 @@ class NotificationService {
     return this.notifyByRole(ROLES.SALES_MEMBER, {
       ...payload,
       linkPath,
-    });
+    }, { excludeUserIds: options.excludeUserIds || [] });
   }
 
-  async notifyCustomers(payload) {
+  async notifyCustomers(payload, options = {}) {
+    const exclude = new Set((options.excludeUserIds || []).map(Number).filter(Boolean));
+    if (payload.createdBy) exclude.add(Number(payload.createdBy));
+
     const customers = await User.findAll({
       where: { role: ROLES.CUSTOMER, status: 'ACTIVE' },
       attributes: ['id', 'role'],
     });
     const results = [];
     for (const customer of customers) {
+      if (exclude.has(customer.id)) continue;
       results.push(await this.create({
         ...payload,
         userId: customer.id,
@@ -175,7 +194,14 @@ class NotificationService {
       throw err;
     }
     await row.update({ isRead: true });
-    return this.format(row);
+    const formatted = this.format(row);
+    try {
+      const { emitNotificationRead } = require('../utils/realtime');
+      emitNotificationRead(userId, formatted);
+    } catch {
+      // realtime optional during bootstrap
+    }
+    return formatted;
   }
 
   async markAllRead(userId) {
@@ -183,6 +209,12 @@ class NotificationService {
       { isRead: true },
       { where: { userId: Number(userId), isRead: false } }
     );
+    try {
+      const { emitNotificationCount } = require('../utils/realtime');
+      emitNotificationCount(userId, 0);
+    } catch {
+      // realtime optional during bootstrap
+    }
     return { success: true };
   }
 

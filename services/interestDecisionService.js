@@ -303,6 +303,10 @@ class InterestDecisionService {
       propertyType: property?.category?.nameEn || property?.category?.slug || null,
       postedByName: property?.postedBy?.name || null,
       ownerName: property?.contactName || property?.postedBy?.name || null,
+      mapPlotId: r.mapPlotId || interest?.mapPlotId || null,
+      mapPlotNo: interest?.mapPlotNo || null,
+      mapPhase: interest?.mapPhase || null,
+      mapPlotExternalId: interest?.mapPlotExternalId || null,
       property: property
         ? {
             id: property.id,
@@ -327,6 +331,13 @@ class InterestDecisionService {
         createdAt: h.createdAt,
       })),
     };
+    if (base.mapPlotNo) {
+      const phaseLabel = base.mapPhase ? `Phase ${base.mapPhase}` : null;
+      const plotLabel = `Plot ${base.mapPlotNo}${phaseLabel ? ` (${phaseLabel})` : ''}`;
+      base.propertyName = property?.titleEn
+        ? `${plotLabel} — ${property.titleEn}`
+        : plotLabel;
+    }
     return bookingManagementService.enrichBooking(base, row, req);
   }
 
@@ -477,9 +488,47 @@ class InterestDecisionService {
     const agentId = interest.assignedAgentId || interest.referralAgentId || null;
     const bookingDate = new Date();
     const expiry = bookingManagementService.addDays(bookingDate, BookingRequest.RESERVATION_DAYS || 15);
+    const mapPlotId = interest.mapPlotId || null;
+    const mapBookingService = mapPlotId ? require('./mapBookingService') : null;
 
     const resultId = await sequelize.transaction(async (transaction) => {
-      const property = await bookingManagementService.assertPropertyAvailable(interest.propertyId, transaction);
+      let totalAmount = null;
+      let property = null;
+
+      if (mapPlotId) {
+        const MapPlot = require('../models').MapPlot;
+        const plot = await MapPlot.findByPk(mapPlotId, {
+          transaction,
+          lock: transaction.LOCK.UPDATE,
+        });
+        if (!plot) {
+          const err = new Error('Map plot not found.');
+          err.status = 404;
+          throw err;
+        }
+        if (plot.status !== 'available') {
+          const err = new Error('This plot is already reserved or sold and is not available for booking.');
+          err.status = 409;
+          err.code = 'PLOT_NOT_AVAILABLE';
+          throw err;
+        }
+        const plotType = String(plot.plotType || 'residential').toLowerCase();
+        if (plotType !== 'residential') {
+          const err = new Error('This plot is not available for booking (amenities/commercial).');
+          err.status = 409;
+          err.code = 'PLOT_NOT_SALEABLE';
+          throw err;
+        }
+        property = await bookingManagementService.assertPropertyAvailable(
+          interest.propertyId,
+          transaction,
+          { mapPlotId }
+        );
+        totalAmount = plot.plotCost != null ? Number(plot.plotCost) : null;
+      } else {
+        property = await bookingManagementService.assertPropertyAvailable(interest.propertyId, transaction);
+        totalAmount = property.price != null ? Number(property.price) : null;
+      }
 
       const from = interest.status;
       await interest.update({
@@ -501,13 +550,14 @@ class InterestDecisionService {
         expressInterestId: interest.id,
         customerId: customer.id,
         propertyId: interest.propertyId,
+        mapPlotId,
         assignedAgentId: agentId,
         status: 'BOOKING_REQUESTED',
         remarks,
         bookingDate,
         expiryDate: expiry,
         originalExpiryDate: expiry,
-        totalAmount: property.price != null ? Number(property.price) : null,
+        totalAmount,
         amountPaid: 0,
         paymentStatus: 'PENDING',
         followUpStatus: 'PENDING_CUSTOMER_RESPONSE',
@@ -524,13 +574,29 @@ class InterestDecisionService {
         createdBy: customer.id,
       }, { transaction });
 
-      await bookingManagementService.reserveProperty(interest.propertyId, transaction);
+      if (mapPlotId) {
+        await mapBookingService.book(
+          mapPlotId,
+          {
+            customerId: customer.id,
+            customerName: customer.name,
+            bookingRequestId: booking.id,
+            remarks,
+          },
+          customer,
+          { transaction }
+        );
+      } else {
+        await bookingManagementService.reserveProperty(interest.propertyId, transaction);
+      }
 
       await this.logActivity(
         'BookingRequest',
         booking.id,
         'SUBMITTED',
-        `Linked to ExpressInterest #${interest.id}. Property reserved until ${expiry.toISOString()}`,
+        mapPlotId
+          ? `Linked to ExpressInterest #${interest.id}. Map plot reserved until ${expiry.toISOString()}`
+          : `Linked to ExpressInterest #${interest.id}. Property reserved until ${expiry.toISOString()}`,
         customer.id,
         transaction
       );
@@ -545,7 +611,7 @@ class InterestDecisionService {
       userId: customer.id,
       userRole: ROLES.CUSTOMER,
       titleEn: 'Booking Created',
-      messageEn: `Your booking for "${propertyTitle}" was created. Property reserved for ${BookingRequest.RESERVATION_DAYS || 15} days.`,
+      messageEn: `Your booking for "${propertyTitle}" was created. Reserved for ${BookingRequest.RESERVATION_DAYS || 15} days.`,
       notificationType: 'booking_created',
       referenceType: 'booking_request',
       referenceId: resultId,
@@ -555,7 +621,7 @@ class InterestDecisionService {
 
     await notificationService.notifyAdmins({
       titleEn: 'New Booking',
-      messageEn: `${formatted.customer?.name || 'Customer'} booked "${propertyTitle}". Property is now Reserved.`,
+      messageEn: `${formatted.customer?.name || 'Customer'} booked "${propertyTitle}". Now reserved.`,
       notificationType: 'booking_request_new',
       referenceType: 'booking_request',
       referenceId: resultId,
@@ -567,9 +633,9 @@ class InterestDecisionService {
       await notificationService.create({
         userId: agentId,
         userRole: ROLES.AGENT,
-        titleEn: 'New Assigned Booking',
-        messageEn: `Customer booked "${propertyTitle}". Follow up within the reservation period.`,
-        notificationType: 'booking_request_agent',
+        titleEn: 'Customer Booking',
+        messageEn: `${formatted.customer?.name || 'Customer'} booked "${propertyTitle}".`,
+        notificationType: 'booking_agent_notify',
         referenceType: 'booking_request',
         referenceId: resultId,
         linkPath: '/mediator/bookings',
@@ -786,10 +852,13 @@ class InterestDecisionService {
         createdBy: adminUser.id,
       }, { transaction });
 
-      if (nextStatus === 'REJECTED' || nextStatus === 'BOOKING_EXPIRED') {
-        await bookingManagementService.releaseProperty(row.propertyId, transaction);
+      if (nextStatus === 'REJECTED' || nextStatus === 'BOOKING_EXPIRED' || nextStatus === 'CANCELLED') {
+        await bookingManagementService.releaseBookingReservation(row, transaction);
       }
-      if (nextStatus === 'BOOKING_APPROVED' || nextStatus === 'BOOKING_CONFIRMED') {
+      if (
+        !row.mapPlotId
+        && (nextStatus === 'BOOKING_APPROVED' || nextStatus === 'BOOKING_CONFIRMED')
+      ) {
         await bookingManagementService.reserveProperty(row.propertyId, transaction);
       }
 

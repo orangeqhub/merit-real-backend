@@ -12,6 +12,7 @@ const {
   sequelize,
 } = require('../models');
 const { resolveMediaUrl } = require('../utils/mediaUrl');
+const { applyNearbyFilter, DEFAULT_RADIUS_KM } = require('../utils/geo');
 
 const PROPERTY_STATUSES = new Set(['ACTIVE', 'INACTIVE', 'DRAFT', 'BOOKED', 'SOLD']);
 /** Legacy UI used "pending" for unpublished listings; map to DRAFT. OPEN maps to ACTIVE. */
@@ -192,6 +193,12 @@ class PropertyService {
       where.status = { [Op.in]: ['ACTIVE', 'BOOKED'] };
     }
 
+    const lat = filters.latitude != null ? Number(filters.latitude) : null;
+    const lng = filters.longitude != null ? Number(filters.longitude) : null;
+    const radiusKm = filters.radiusKm != null ? Number(filters.radiusKm) : DEFAULT_RADIUS_KM;
+    const useGeo = Number.isFinite(lat) && Number.isFinite(lng);
+    const detectedCity = filters.city || filters.location || null;
+
     if (filters.categorySlug) {
       const category = await PropertyCategory.findOne({ where: { slug: filters.categorySlug } });
       if (!category) {
@@ -201,7 +208,7 @@ class PropertyService {
     }
     if (filters.categoryId) where.categoryId = Number(filters.categoryId);
 
-    if (filters.city) {
+    if (filters.city && !useGeo) {
       where.city = { [Op.iLike]: String(filters.city).trim() };
     }
     if (filters.district) {
@@ -263,13 +270,28 @@ class PropertyService {
         },
       ],
       order,
-      limit: pageSize,
-      offset,
+      limit: useGeo ? Math.min(500, Math.max(pageSize, 100)) : pageSize,
+      offset: useGeo ? 0 : offset,
       distinct: true,
     });
 
+    let items = rows.map((row) => this.format(row, req));
+
+    if (useGeo) {
+      items = applyNearbyFilter(items, lat, lng, radiusKm, detectedCity);
+      const total = items.length;
+      items = items.slice(offset, offset + pageSize);
+      return {
+        items,
+        total,
+        page,
+        pageSize,
+        totalPages: Math.max(1, Math.ceil(total / pageSize)),
+      };
+    }
+
     return {
-      items: rows.map((row) => this.format(row, req)),
+      items,
       total: count,
       page,
       pageSize,
@@ -294,27 +316,36 @@ class PropertyService {
     return this.format(property, req);
   }
 
-  async getFeatured(limit = 8, location, req = null) {
+  async getFeatured(limit = 8, location, req = null, geo = {}) {
     return this.list({
       section: 'featured',
       pageSize: limit,
       city: location || undefined,
+      latitude: geo.latitude,
+      longitude: geo.longitude,
+      radiusKm: geo.radiusKm,
     }, req).then((r) => r.items);
   }
 
-  async getLatest(limit = 8, location, req = null) {
+  async getLatest(limit = 8, location, req = null, geo = {}) {
     return this.list({
       section: 'latest',
       pageSize: limit,
       city: location || undefined,
+      latitude: geo.latitude,
+      longitude: geo.longitude,
+      radiusKm: geo.radiusKm,
     }, req).then((r) => r.items);
   }
 
-  async getTrending(limit = 8, location, req = null) {
+  async getTrending(limit = 8, location, req = null, geo = {}) {
     return this.list({
       section: 'trending',
       pageSize: limit,
       city: location || undefined,
+      latitude: geo.latitude,
+      longitude: geo.longitude,
+      radiusKm: geo.radiusKm,
     }, req).then((r) => r.items);
   }
 

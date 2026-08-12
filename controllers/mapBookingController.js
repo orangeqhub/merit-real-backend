@@ -78,6 +78,15 @@ class MapBookingController {
       return next(error);
     }
   }
+
+  async importSheet(req, res, next) {
+    try {
+      const data = await mapBookingService.importSheet(req.body || {});
+      return res.json({ success: true, message: 'Sheet imported.', data, errors: data.errors || [] });
+    } catch (error) {
+      return next(error);
+    }
+  }
 }
 
 module.exports = new MapBookingController();

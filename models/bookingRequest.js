@@ -45,6 +45,7 @@ module.exports = (sequelize, DataTypes) => {
       BookingRequest.belongsTo(models.User, { foreignKey: 'customerId', as: 'customer' });
       BookingRequest.belongsTo(models.User, { foreignKey: 'assignedAgentId', as: 'assignedAgent' });
       BookingRequest.belongsTo(models.Property, { foreignKey: 'propertyId', as: 'property' });
+      BookingRequest.belongsTo(models.MapPlot, { foreignKey: 'mapPlotId', as: 'mapPlot' });
       BookingRequest.hasMany(models.BookingRequestHistory, { foreignKey: 'bookingRequestId', as: 'history' });
       BookingRequest.hasMany(models.BookingPayment, { foreignKey: 'bookingRequestId', as: 'payments' });
       BookingRequest.hasMany(models.BookingFollowUp, { foreignKey: 'bookingRequestId', as: 'followUps' });
@@ -61,6 +62,7 @@ module.exports = (sequelize, DataTypes) => {
     expressInterestId: { type: DataTypes.INTEGER, allowNull: false },
     customerId: { type: DataTypes.INTEGER, allowNull: false },
     propertyId: { type: DataTypes.INTEGER, allowNull: false },
+    mapPlotId: DataTypes.INTEGER,
     assignedAgentId: DataTypes.INTEGER,
     status: {
       type: DataTypes.ENUM(...BOOKING_STATUSES),

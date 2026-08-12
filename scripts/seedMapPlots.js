@@ -6,6 +6,8 @@
  */
 const path = require('path');
 const mapBookingService = require('../services/mapBookingService');
+const { assignPlotPhases } = require('../utils/plotPhases');
+const { toSeriesPlotNo } = require('../utils/plotSeries');
 
 async function main() {
   const candidates = [
@@ -25,14 +27,18 @@ async function main() {
   }
   // eslint-disable-next-line import/no-dynamic-require, global-require
   const mapping = require(mappingPath);
-  const items = (Array.isArray(mapping) ? mapping : []).map((plot) => ({
+  const phased = assignPlotPhases(Array.isArray(mapping) ? mapping : []);
+  const items = phased.map((plot) => ({
     externalId: String(plot.id),
-    plotNo: String(plot.plotNumber),
+    plotNo: toSeriesPlotNo(plot.phase, plot.plotNumber),
+    phase: plot.phase,
     plotArea: Math.round(Number(plot.area || 0) * 100) / 100,
     status: 'available',
   }));
 
-  console.log(`Seeding ${items.length} map plots…`);
+  const p1 = items.filter((i) => i.phase === 1).length;
+  const p2 = items.filter((i) => i.phase === 2).length;
+  console.log(`Seeding ${items.length} map plots (Phase 1: ${p1}, Phase 2: ${p2})…`);
   const result = await mapBookingService.seedPlots(items);
   console.log('Done:', result);
   process.exit(0);

@@ -7,6 +7,8 @@ module.exports = (sequelize, DataTypes) => {
     static associate(models) {
       MapPlot.belongsTo(models.Property, { foreignKey: 'propertyId', as: 'property' });
       MapPlot.belongsTo(models.User, { foreignKey: 'customerId', as: 'customer' });
+      MapPlot.belongsTo(models.BookingRequest, { foreignKey: 'bookingRequestId', as: 'bookingRequest' });
+      MapPlot.hasMany(models.ExpressInterest, { foreignKey: 'mapPlotId', as: 'expressInterests' });
     }
   }
 
@@ -20,6 +22,11 @@ module.exports = (sequelize, DataTypes) => {
       type: DataTypes.STRING(50),
       allowNull: false,
     },
+    phase: {
+      type: DataTypes.SMALLINT,
+      allowNull: false,
+      defaultValue: 1,
+    },
     propertyId: DataTypes.INTEGER,
     customerName: DataTypes.STRING(150),
     customerId: DataTypes.INTEGER,
@@ -32,6 +39,12 @@ module.exports = (sequelize, DataTypes) => {
     },
     remarks: DataTypes.TEXT,
     plotCost: DataTypes.DECIMAL(14, 2),
+    ratePerSqYd: DataTypes.DECIMAL(14, 2),
+    plotType: {
+      type: DataTypes.STRING(30),
+      allowNull: false,
+      defaultValue: 'residential',
+    },
     sizeEast: DataTypes.DECIMAL(12, 2),
     sizeWest: DataTypes.DECIMAL(12, 2),
     sizeNorth: DataTypes.DECIMAL(12, 2),

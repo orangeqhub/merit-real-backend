@@ -142,7 +142,7 @@ class BookingManagementService {
     ];
   }
 
-  async assertPropertyAvailable(propertyId, transaction) {
+  async assertPropertyAvailable(propertyId, transaction, options = {}) {
     const property = await Property.findByPk(propertyId, { transaction });
     if (!property) {
       const err = new Error('Property not found.');
@@ -159,6 +159,10 @@ class BookingManagementService {
       const err = new Error('Property is not available.');
       err.status = 404;
       throw err;
+    }
+    // Layout venture property can hold many concurrent plot bookings.
+    if (options.skipActiveBookingCheck || options.mapPlotId) {
+      return property;
     }
     const existing = await BookingRequest.findOne({
       where: {
@@ -188,6 +192,16 @@ class BookingManagementService {
     if (property && property.status === 'BOOKED') {
       await property.update({ status: 'ACTIVE' }, { transaction });
     }
+  }
+
+  async releaseBookingReservation(bookingRow, transaction) {
+    const mapPlotId = bookingRow?.mapPlotId || null;
+    if (mapPlotId) {
+      const mapBookingService = require('./mapBookingService');
+      await mapBookingService.release(mapPlotId, { transaction });
+      return;
+    }
+    await this.releaseProperty(bookingRow.propertyId, transaction);
   }
 
   async closePendingFollowUps(bookingRequestId, adminUserId, note, transaction) {
@@ -453,7 +467,7 @@ class BookingManagementService {
         note,
         createdBy: adminUser.id,
       }, { transaction });
-      await this.releaseProperty(row.propertyId, transaction);
+      await this.releaseBookingReservation(row, transaction);
     });
 
     const interestDecisionService = require('./interestDecisionService');
@@ -619,7 +633,7 @@ class BookingManagementService {
         createdBy: adminUser.id,
       }, { transaction });
       await this.closePendingFollowUps(row.id, adminUser.id, `Released: ${reason}`, transaction);
-      await this.releaseProperty(row.propertyId, transaction);
+      await this.releaseBookingReservation(row, transaction);
       await ActivityLog.create({
         entityType: 'BookingRequest',
         entityId: row.id,

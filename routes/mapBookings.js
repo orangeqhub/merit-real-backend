@@ -26,6 +26,13 @@ router.post(
 );
 
 router.post(
+  '/plots/import',
+  authenticate,
+  authorizeRoles(ROLES.ADMIN, ROLES.SALES_MEMBER),
+  (req, res, next) => mapBookingController.importSheet(req, res, next)
+);
+
+router.post(
   '/plots',
   authenticate,
   authorizeRoles(ROLES.ADMIN, ROLES.SALES_MEMBER),
@@ -39,10 +46,11 @@ router.patch(
   (req, res, next) => mapBookingController.updatePricing(req, res, next)
 );
 
+/** Admin/sales override only — customers book via Express Interest → Booking pipeline. */
 router.post(
   '/plots/:id/book',
   authenticate,
-  authorizeRoles(ROLES.ADMIN, ROLES.SALES_MEMBER, ROLES.CUSTOMER, ROLES.AGENT),
+  authorizeRoles(ROLES.ADMIN, ROLES.SALES_MEMBER),
   (req, res, next) => mapBookingController.book(req, res, next)
 );
 

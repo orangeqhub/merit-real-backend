@@ -62,6 +62,69 @@ function emitNotification(userId, notification) {
   emitToUser(userId, 'notification:new', notification);
 }
 
+function emitNotificationRead(userId, notification) {
+  emitToUser(userId, 'notification:read', notification);
+}
+
+function emitNotificationCount(userId, unreadCount) {
+  emitToUser(userId, 'notification:count-updated', { unreadCount });
+}
+
+function buildDomainEnvelope(event, payload = {}) {
+  const entityId = payload.entityId ?? payload.interest?.id ?? payload.booking?.id ?? null;
+  return {
+    eventId: payload.eventId || `${event}:${entityId || 'none'}:${Date.now()}`,
+    ...payload,
+  };
+}
+
+function emitDomainEvent(userId, event, payload) {
+  if (!userId) return;
+  emitToUser(userId, event, buildDomainEnvelope(event, payload));
+}
+
+function emitExpressInterestUpdated(recipients, interest, action = 'updated') {
+  const payload = buildDomainEnvelope(`express-interest:${action}`, {
+    entityType: 'express_interest',
+    entityId: interest?.id,
+    action,
+    interest,
+  });
+  const seen = new Set();
+  for (const userId of recipients || []) {
+    const id = Number(userId);
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    emitToUser(id, 'express-interest:updated', payload);
+    if (action !== 'updated') {
+      emitToUser(id, `express-interest:${action}`, payload);
+    }
+  }
+  emitToRole('ADMIN', 'express-interest:updated', payload);
+  emitToRole('SALES_MEMBER', 'express-interest:updated', payload);
+}
+
+function emitBookingUpdated(recipients, booking, action = 'updated') {
+  const payload = buildDomainEnvelope(`booking:${action}`, {
+    entityType: 'booking_request',
+    entityId: booking?.id,
+    action,
+    booking,
+  });
+  const seen = new Set();
+  for (const userId of recipients || []) {
+    const id = Number(userId);
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    emitToUser(id, 'booking:updated', payload);
+    if (action !== 'updated') {
+      emitToUser(id, `booking:${action}`, payload);
+    }
+  }
+  emitToRole('ADMIN', 'booking:updated', payload);
+  emitToRole('SALES_MEMBER', 'booking:updated', payload);
+}
+
 module.exports = {
   initRealtime,
   getIo,
@@ -69,4 +132,9 @@ module.exports = {
   emitToRole,
   emitWalletUpdate,
   emitNotification,
+  emitNotificationRead,
+  emitNotificationCount,
+  emitDomainEvent,
+  emitExpressInterestUpdated,
+  emitBookingUpdated,
 };

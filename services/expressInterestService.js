@@ -12,11 +12,15 @@ const {
   PropertyImage,
   PurchaseRequest,
   BookingRequest,
+  MapPlot,
   sequelize,
 } = require('../models');
 const { ROLES, USER_STATUSES } = require('../constants/roles');
 const { EMPLOYEE_PERMISSIONS } = require('../constants/employeePermissions');
 const notificationService = require('./notificationService');
+const layoutPropertyService = require('./layoutPropertyService');
+const { expressInterestLink } = require('../utils/notificationLinks');
+const { emitExpressInterestUpdated } = require('../utils/realtime');
 
 const OPEN_STATUSES = ['PENDING_APPROVAL', 'APPROVED', 'ASSIGNED', 'PURCHASE_REQUESTED', 'BOOKING_REQUESTED'];
 
@@ -51,6 +55,22 @@ class ExpressInterestService {
       },
       { model: PurchaseRequest, as: 'purchaseRequest' },
       { model: BookingRequest, as: 'bookingRequest' },
+      {
+        model: MapPlot,
+        as: 'mapPlot',
+        attributes: [
+          'id',
+          'externalId',
+          'plotNo',
+          'phase',
+          'status',
+          'plotArea',
+          'facing',
+          'plotCost',
+          'ratePerSqYd',
+          'plotType',
+        ],
+      },
     ];
   }
 
@@ -85,7 +105,7 @@ class ExpressInterestService {
     const referral = r.referralAgent || null;
     const employeeWorkflowStatus = r.employeeWorkflowStatus || 'new';
 
-    return {
+    const formatted = {
       id: r.id,
       interestId: r.id,
       customerId: r.customerId,
@@ -144,6 +164,24 @@ class ExpressInterestService {
         : null,
       propertyName: property?.titleEn || null,
       project: property?.ventureName || property?.category?.nameEn || null,
+      mapPlotId: r.mapPlotId || null,
+      mapPlotExternalId: r.mapPlotExternalId || r.mapPlot?.externalId || null,
+      mapPlotNo: r.mapPlotNo || r.mapPlot?.plotNo || null,
+      mapPhase: r.mapPhase != null ? Number(r.mapPhase) : (r.mapPlot?.phase != null ? Number(r.mapPlot.phase) : null),
+      mapPlot: r.mapPlot
+        ? {
+            id: r.mapPlot.id,
+            externalId: r.mapPlot.externalId,
+            plotNo: r.mapPlot.plotNo,
+            phase: Number(r.mapPlot.phase) === 2 ? 2 : 1,
+            status: r.mapPlot.status,
+            plotArea: r.mapPlot.plotArea != null ? Number(r.mapPlot.plotArea) : null,
+            facing: r.mapPlot.facing || null,
+            plotCost: r.mapPlot.plotCost != null ? Number(r.mapPlot.plotCost) : null,
+            ratePerSqYd: r.mapPlot.ratePerSqYd != null ? Number(r.mapPlot.ratePerSqYd) : null,
+            plotType: r.mapPlot.plotType || 'residential',
+          }
+        : null,
       history: (r.history || []).map((h) => ({
         id: h.id,
         fromStatus: h.fromStatus,
@@ -162,6 +200,16 @@ class ExpressInterestService {
         createdAt: f.createdAt,
       })),
     };
+
+    if (formatted.mapPlotNo) {
+      const phaseLabel = formatted.mapPhase ? `Phase ${formatted.mapPhase}` : null;
+      const plotLabel = `Plot ${formatted.mapPlotNo}${phaseLabel ? ` (${phaseLabel})` : ''}`;
+      formatted.propertyName = property?.titleEn
+        ? `${plotLabel} — ${property.titleEn}`
+        : plotLabel;
+    }
+
+    return formatted;
   }
 
   async logActivity(entityType, entityId, action, details, createdBy, transaction) {
@@ -338,35 +386,90 @@ class ExpressInterestService {
   }
 
   async submit(body, customer, req = null) {
-    const propertyId = Number(body.propertyId);
-    if (!propertyId) {
-      const err = new Error('Property is required.');
-      err.status = 400;
-      throw err;
-    }
+    const mapPlotKey = String(
+      body.mapPlotExternalId || body.mapPlotId || body.externalId || body.plotId || ''
+    ).trim();
+    let mapPlot = null;
+    let property = null;
+    let propertyId = Number(body.propertyId) || null;
 
-    const property = await Property.findByPk(propertyId, {
-      include: [{ model: PropertyCategory, as: 'category' }],
-    });
-    if (!property || property.status !== 'ACTIVE') {
-      const err = new Error('Property not found or not available.');
-      err.status = 404;
-      err.code = 'PROPERTY_NOT_FOUND';
-      throw err;
-    }
+    if (mapPlotKey) {
+      const where = /^\d+$/.test(mapPlotKey)
+        ? { id: Number(mapPlotKey) }
+        : { externalId: mapPlotKey };
+      mapPlot = await MapPlot.findOne({ where });
+      if (!mapPlot) {
+        const err = new Error('Plot not found.');
+        err.status = 404;
+        err.code = 'PLOT_NOT_FOUND';
+        throw err;
+      }
+      if (mapPlot.status !== 'available') {
+        const err = new Error('This plot is not available for booking.');
+        err.status = 409;
+        err.code = 'PLOT_NOT_AVAILABLE';
+        throw err;
+      }
+      const plotType = String(mapPlot.plotType || 'residential').toLowerCase();
+      if (plotType !== 'residential') {
+        const err = new Error('This plot is not available for booking (amenities/commercial).');
+        err.status = 409;
+        err.code = 'PLOT_NOT_SALEABLE';
+        throw err;
+      }
 
-    const duplicate = await ExpressInterest.findOne({
-      where: {
-        customerId: customer.id,
-        propertyId,
-        status: { [Op.in]: OPEN_STATUSES },
-      },
-    });
-    if (duplicate) {
-      const err = new Error('You already have an open express interest for this property.');
-      err.status = 409;
-      err.code = 'DUPLICATE_INTEREST';
-      throw err;
+      const openForPlot = await ExpressInterest.findOne({
+        where: {
+          mapPlotId: mapPlot.id,
+          status: { [Op.in]: OPEN_STATUSES },
+        },
+      });
+      if (openForPlot) {
+        const err = new Error(
+          openForPlot.customerId === customer.id
+            ? 'You already have an open interest for this plot.'
+            : 'This plot already has an open interest from another customer.'
+        );
+        err.status = 409;
+        err.code = 'DUPLICATE_PLOT_INTEREST';
+        throw err;
+      }
+
+      property = await layoutPropertyService.ensureAnneEnclaveProperty();
+      propertyId = property.id;
+      if (!mapPlot.propertyId) {
+        await mapPlot.update({ propertyId });
+      }
+    } else {
+      if (!propertyId) {
+        const err = new Error('Property is required.');
+        err.status = 400;
+        throw err;
+      }
+      property = await Property.findByPk(propertyId, {
+        include: [{ model: PropertyCategory, as: 'category' }],
+      });
+      if (!property || property.status !== 'ACTIVE') {
+        const err = new Error('Property not found or not available.');
+        err.status = 404;
+        err.code = 'PROPERTY_NOT_FOUND';
+        throw err;
+      }
+
+      const duplicate = await ExpressInterest.findOne({
+        where: {
+          customerId: customer.id,
+          propertyId,
+          mapPlotId: null,
+          status: { [Op.in]: OPEN_STATUSES },
+        },
+      });
+      if (duplicate) {
+        const err = new Error('You already have an open express interest for this property.');
+        err.status = 409;
+        err.code = 'DUPLICATE_INTEREST';
+        throw err;
+      }
     }
 
     let referralAgent = null;
@@ -384,11 +487,19 @@ class ExpressInterestService {
     }
 
     const remarks = String(body.remarks || body.message || '').trim() || null;
+    const mapPhase = mapPlot ? (Number(mapPlot.phase) === 2 ? 2 : 1) : null;
+    const labelTitle = mapPlot
+      ? `Plot ${mapPlot.plotNo} (Phase ${mapPhase}) — ${property.titleEn}`
+      : property.titleEn;
 
     const result = await sequelize.transaction(async (transaction) => {
       const interest = await ExpressInterest.create({
         customerId: customer.id,
         propertyId,
+        mapPlotId: mapPlot?.id || null,
+        mapPlotExternalId: mapPlot?.externalId || null,
+        mapPlotNo: mapPlot?.plotNo || null,
+        mapPhase,
         referralAgentId: referralAgent?.id || null,
         assignedAgentId: referralAgent?.id || null,
         status: 'PENDING_APPROVAL',
@@ -404,7 +515,7 @@ class ExpressInterestService {
         interest.id,
         null,
         'PENDING_APPROVAL',
-        'Express interest submitted',
+        mapPlot ? `Express interest submitted for map plot ${mapPlot.plotNo}` : 'Express interest submitted',
         customer.id,
         transaction
       );
@@ -412,7 +523,9 @@ class ExpressInterestService {
         'ExpressInterest',
         interest.id,
         'SUBMITTED',
-        `Customer ${customer.id} submitted interest for property ${propertyId}`,
+        mapPlot
+          ? `Customer ${customer.id} submitted interest for map plot ${mapPlot.externalId}`
+          : `Customer ${customer.id} submitted interest for property ${propertyId}`,
         customer.id,
         transaction
       );
@@ -422,26 +535,13 @@ class ExpressInterestService {
 
     const formatted = await this.getById(result);
 
-    // Notifications
     await notificationService.notifyAdmins({
-      titleEn: 'New Express Interest',
-      messageEn: `${customer.name} expressed interest in "${property.titleEn}".`,
+      titleEn: mapPlot ? 'New Plot Interest' : 'New Express Interest',
+      messageEn: `${customer.name} expressed interest in "${labelTitle}".`,
       notificationType: 'express_interest_new',
       referenceType: 'express_interest',
       referenceId: result,
-      linkPath: '/admin/express-interests',
-      createdBy: customer.id,
-    });
-
-    await notificationService.create({
-      userId: customer.id,
-      userRole: ROLES.CUSTOMER,
-      titleEn: 'Express Interest Submitted',
-      messageEn: `Your interest for "${property.titleEn}" was submitted and is pending approval.`,
-      notificationType: 'express_interest_submitted',
-      referenceType: 'express_interest',
-      referenceId: result,
-      linkPath: '/buyer/interests',
+      linkPath: expressInterestLink(ROLES.ADMIN, result),
       createdBy: customer.id,
     });
 
@@ -450,14 +550,20 @@ class ExpressInterestService {
         userId: referralAgent.id,
         userRole: ROLES.AGENT,
         titleEn: 'New Customer Lead',
-        messageEn: `${customer.name} listed you as referral agent for "${property.titleEn}".`,
+        messageEn: `${customer.name} listed you as referral agent for "${labelTitle}".`,
         notificationType: 'agent_referral_lead',
         referenceType: 'express_interest',
         referenceId: result,
-        linkPath: '/mediator/leads',
+        linkPath: expressInterestLink(ROLES.AGENT, result),
         createdBy: customer.id,
       });
     }
+
+    emitExpressInterestUpdated(
+      [customer.id, referralAgent?.id].filter(Boolean),
+      formatted,
+      'created'
+    );
 
     return formatted;
   }
@@ -517,7 +623,7 @@ class ExpressInterestService {
       notificationType: 'express_interest_approved',
       referenceType: 'express_interest',
       referenceId: interest.id,
-      linkPath: '/buyer/interests',
+      linkPath: expressInterestLink(ROLES.CUSTOMER, interest.id),
       createdBy: adminUser.id,
     });
 
@@ -530,7 +636,7 @@ class ExpressInterestService {
         notificationType: 'lead_approved',
         referenceType: 'express_interest',
         referenceId: interest.id,
-        linkPath: '/mediator/leads',
+        linkPath: expressInterestLink(ROLES.AGENT, interest.id),
         createdBy: adminUser.id,
       });
 
@@ -542,10 +648,16 @@ class ExpressInterestService {
         notificationType: 'agent_assigned',
         referenceType: 'express_interest',
         referenceId: interest.id,
-        linkPath: '/buyer/interests',
+        linkPath: expressInterestLink(ROLES.CUSTOMER, interest.id),
         createdBy: adminUser.id,
       });
     }
+
+    emitExpressInterestUpdated(
+      [interest.customerId, assignAgentId].filter(Boolean),
+      formatted,
+      'approved'
+    );
 
     return formatted;
   }
@@ -593,7 +705,7 @@ class ExpressInterestService {
       notificationType: 'express_interest_rejected',
       referenceType: 'express_interest',
       referenceId: interest.id,
-      linkPath: '/buyer/interests',
+      linkPath: expressInterestLink(ROLES.CUSTOMER, interest.id),
       createdBy: adminUser.id,
     });
 
@@ -603,14 +715,20 @@ class ExpressInterestService {
         userId: agentId,
         userRole: ROLES.AGENT,
         titleEn: 'Lead Rejected',
-        messageEn: `A referred lead was rejected by admin.`,
+        messageEn: 'A referred lead was rejected by admin.',
         notificationType: 'lead_rejected',
         referenceType: 'express_interest',
         referenceId: interest.id,
-        linkPath: '/mediator/leads',
+        linkPath: expressInterestLink(ROLES.AGENT, interest.id),
         createdBy: adminUser.id,
       });
     }
+
+    emitExpressInterestUpdated(
+      [interest.customerId, interest.assignedAgentId, interest.referralAgentId].filter(Boolean),
+      formatted,
+      'rejected'
+    );
 
     return formatted;
   }
@@ -677,7 +795,7 @@ class ExpressInterestService {
       notificationType: 'lead_assigned',
       referenceType: 'express_interest',
       referenceId: interest.id,
-      linkPath: '/mediator/leads',
+      linkPath: expressInterestLink(ROLES.AGENT, interest.id),
       createdBy: adminUser.id,
     });
 
@@ -689,7 +807,7 @@ class ExpressInterestService {
       notificationType: 'agent_assigned',
       referenceType: 'express_interest',
       referenceId: interest.id,
-      linkPath: '/buyer/interests',
+      linkPath: expressInterestLink(ROLES.CUSTOMER, interest.id),
       createdBy: adminUser.id,
     });
 
@@ -699,9 +817,15 @@ class ExpressInterestService {
       notificationType: 'lead_assignment',
       referenceType: 'express_interest',
       referenceId: interest.id,
-      linkPath: '/admin/express-interests',
+      linkPath: expressInterestLink(ROLES.ADMIN, interest.id),
       createdBy: adminUser.id,
     });
+
+    emitExpressInterestUpdated(
+      [interest.customerId, agent.id].filter(Boolean),
+      formatted,
+      'assigned'
+    );
 
     return formatted;
   }
@@ -796,9 +920,11 @@ class ExpressInterestService {
       notificationType: 'lead_status_update',
       referenceType: 'express_interest',
       referenceId: interest.id,
-      linkPath: '/buyer/interests',
+      linkPath: expressInterestLink(ROLES.CUSTOMER, interest.id),
       createdBy: agentUser.id,
     });
+
+    emitExpressInterestUpdated([interest.customerId, agentUser.id], formatted, 'updated');
 
     return formatted;
   }
