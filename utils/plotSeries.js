@@ -24,9 +24,10 @@ function toSeriesPlotNo(phase, plotNo) {
   const n = parsePlotNumber(plotNo);
   if (n == null) return String(plotNo ?? '').trim();
   if (phaseNum === 2) {
-    if (n >= PHASE2_SERIES_MIN && n <= PHASE2_SERIES_MAX) return String(n);
     if (n >= 1 && n <= PHASE2_INTERNAL_MAX) return String(n + PHASE2_OFFSET);
+    if (n >= PHASE2_SERIES_MIN && n <= PHASE2_SERIES_MAX) return String(n);
   }
+  if (n >= 1 && n <= PHASE1_MAX) return String(n);
   return String(n);
 }
 

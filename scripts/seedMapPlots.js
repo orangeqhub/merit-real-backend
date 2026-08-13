@@ -12,7 +12,6 @@ const { toSeriesPlotNo } = require('../utils/plotSeries');
 async function main() {
   const candidates = [
     path.resolve(__dirname, '../../merit-map-layout/src/data/plotNumberMapping.json'),
-    path.resolve(__dirname, '../../merit map layout/src/data/plotNumberMapping.json'),
   ];
   const mappingPath = candidates.find((p) => {
     try {
