@@ -14,6 +14,18 @@ const {
 const { resolveMediaUrl } = require('../utils/mediaUrl');
 const { applyNearbyFilter, DEFAULT_RADIUS_KM } = require('../utils/geo');
 
+let emitPropertyUpdatedFn = null;
+function emitPropertyUpdated(property, action) {
+  try {
+    if (!emitPropertyUpdatedFn) {
+      emitPropertyUpdatedFn = require('../utils/realtime').emitPropertyUpdated;
+    }
+    emitPropertyUpdatedFn?.(property, action);
+  } catch {
+    // realtime optional
+  }
+}
+
 const PROPERTY_STATUSES = new Set(['ACTIVE', 'INACTIVE', 'DRAFT', 'BOOKED', 'SOLD']);
 /** Legacy UI used "pending" for unpublished listings; map to DRAFT. OPEN maps to ACTIVE. */
 const PROPERTY_STATUS_ALIASES = { PENDING: 'DRAFT', OPEN: 'ACTIVE', RESERVED: 'BOOKED' };
@@ -145,6 +157,8 @@ class PropertyService {
       westMeasurement: property.westMeasurement || '',
       southMeasurement: property.southMeasurement || '',
       detailsJson: details,
+      categoryDetails: details.categoryDetails || {},
+      categoryDetailsBySlug: details.categoryDetailsBySlug || {},
       structure: details.structure || {},
       plotDetails: details.plotDetails || {},
       contactName: property.contactName || '',
@@ -384,6 +398,77 @@ class PropertyService {
     }
   }
 
+  async syncPropertyImages(propertyId, newFiles, meta, transaction) {
+    const galleryMeta = parseJsonField(meta, {});
+    const deletedIds = (galleryMeta.deletedIds || []).map(Number).filter(Boolean);
+    const order = Array.isArray(galleryMeta.order) ? galleryMeta.order : [];
+    const primaryKey = galleryMeta.primaryKey || null;
+
+    if (deletedIds.length) {
+      const toDelete = await PropertyImage.findAll({
+        where: { id: deletedIds, propertyId },
+        transaction,
+      });
+      for (const img of toDelete) {
+        const full = path.resolve(__dirname, '..', String(img.imagePath).replace(/^\//, ''));
+        if (fs.existsSync(full)) fs.unlinkSync(full);
+      }
+      await PropertyImage.destroy({ where: { id: deletedIds, propertyId }, transaction });
+    }
+
+    const newRecords = [];
+    for (const file of newFiles || []) {
+      const created = await PropertyImage.create({
+        propertyId,
+        imagePath: `/uploads/properties/${file.filename}`,
+        caption: '',
+        isPrimary: false,
+        sortOrder: 999,
+      }, { transaction });
+      newRecords.push(created);
+    }
+
+    const remaining = await PropertyImage.findAll({
+      where: { propertyId },
+      transaction,
+    });
+    const byId = new Map(remaining.map((img) => [img.id, img]));
+
+    const orderedIds = [];
+    if (order.length) {
+      order.forEach((entry) => {
+        if (entry?.type === 'existing' && byId.has(Number(entry.id))) {
+          orderedIds.push(Number(entry.id));
+        } else if (entry?.type === 'new' && newRecords[Number(entry.index)]) {
+          orderedIds.push(newRecords[Number(entry.index)].id);
+        }
+      });
+    }
+
+    if (!orderedIds.length) {
+      remaining
+        .slice()
+        .sort((a, b) => (a.sortOrder - b.sortOrder) || (a.id - b.id))
+        .forEach((img) => orderedIds.push(img.id));
+    }
+
+    let primaryId = null;
+    if (primaryKey) {
+      const [type, raw] = String(primaryKey).split(':');
+      if (type === 'existing') primaryId = Number(raw);
+      else if (type === 'new' && newRecords[Number(raw)]) primaryId = newRecords[Number(raw)].id;
+    }
+    if (!primaryId && orderedIds.length) primaryId = orderedIds[0];
+
+    for (let i = 0; i < orderedIds.length; i += 1) {
+      const id = orderedIds[i];
+      await PropertyImage.update(
+        { sortOrder: i, isPrimary: id === primaryId },
+        { where: { id, propertyId }, transaction }
+      );
+    }
+  }
+
   async attachImages(propertyId, files, { replace = false, primaryIndex = 0 } = {}, transaction) {
     if (replace) {
       const existing = await PropertyImage.findAll({ where: { propertyId }, transaction });
@@ -407,11 +492,22 @@ class PropertyService {
   }
 
   buildPayload(body, userId) {
+    const baseDetails = parseJsonField(body.detailsJson, {});
+    const categoryDetails = parseJsonField(body.categoryDetails, baseDetails.categoryDetails || {});
+    const categoryDetailsBySlug = parseJsonField(
+      body.categoryDetailsBySlug,
+      baseDetails.categoryDetailsBySlug || {}
+    );
+
     const detailsJson = {
-      ...(parseJsonField(body.detailsJson, {})),
-      structure: parseJsonField(body.structure, parseJsonField(body.detailsJson, {}).structure || {}),
-      plotDetails: parseJsonField(body.plotDetails, parseJsonField(body.detailsJson, {}).plotDetails || {}),
+      ...baseDetails,
+      structure: parseJsonField(body.structure, baseDetails.structure || {}),
+      plotDetails: parseJsonField(body.plotDetails, baseDetails.plotDetails || {}),
+      categoryDetails,
+      categoryDetailsBySlug,
     };
+
+    const ventureFromDetails = categoryDetails.ventureName || categoryDetails.layoutProjectName || '';
 
     return {
       categoryId: Number(body.categoryId),
@@ -420,7 +516,7 @@ class PropertyService {
       titleTe: body.titleTe ? String(body.titleTe).trim() : '',
       descriptionEn: body.descriptionEn || '',
       descriptionTe: body.descriptionTe || '',
-      ventureName: body.ventureName || '',
+      ventureName: body.ventureName || ventureFromDetails || '',
       transactionType: body.transactionType || 'sale',
       state: body.state || '',
       district: body.district || '',
@@ -481,16 +577,67 @@ class PropertyService {
       payload.status = 'ACTIVE';
     }
 
+    const galleryMeta = parseJsonField(body.imageGalleryMeta, null);
+    let primaryIndex = 0;
+    if (galleryMeta?.primaryKey?.startsWith('new:')) {
+      primaryIndex = Number(galleryMeta.primaryKey.split(':')[1]) || 0;
+    }
+
     const result = await sequelize.transaction(async (transaction) => {
       const property = await Property.create(payload, { transaction });
       await this.syncAttributes(property.id, attributeIds, transaction);
-      await this.attachImages(property.id, files || [], {
-        primaryIndex: body.primaryImageIndex || 0,
-      }, transaction);
+      if (galleryMeta) {
+        await this.syncPropertyImages(property.id, files || [], galleryMeta, transaction);
+      } else if (files && files.length) {
+        await this.attachImages(property.id, files, { primaryIndex }, transaction);
+      }
       return property.id;
     });
 
-    return this.getById(result, req, { allowInactive: true });
+    const created = await this.getById(result, req, { allowInactive: true });
+    emitPropertyUpdated(created, 'created');
+    return created;
+  }
+
+  /**
+   * Bulk create properties (JSON payloads, no images).
+   * Each item is processed independently — partial success is returned.
+   */
+  async createBulk(items, userId, req = null) {
+    if (!Array.isArray(items) || !items.length) {
+      const err = new Error('At least one property is required.');
+      err.status = 400;
+      throw err;
+    }
+    if (items.length > 50) {
+      const err = new Error('Maximum 50 properties per bulk request.');
+      err.status = 400;
+      throw err;
+    }
+
+    const results = [];
+    for (let i = 0; i < items.length; i += 1) {
+      const item = items[i] || {};
+      try {
+        const created = await this.create(item, [], userId, req);
+        results.push({ index: i, ok: true, property: created });
+      } catch (error) {
+        results.push({
+          index: i,
+          ok: false,
+          titleEn: item.titleEn || '',
+          error: error.message || 'Failed to create property',
+        });
+      }
+    }
+
+    const succeeded = results.filter((r) => r.ok).length;
+    return {
+      total: items.length,
+      succeeded,
+      failed: items.length - succeeded,
+      results,
+    };
   }
 
   async update(id, body, files, req = null) {
@@ -533,7 +680,10 @@ class PropertyService {
       if (attributeIds) {
         await this.syncAttributes(property.id, attributeIds, transaction);
       }
-      if (files && files.length) {
+      const galleryMeta = parseJsonField(body.imageGalleryMeta, null);
+      if (galleryMeta) {
+        await this.syncPropertyImages(property.id, files || [], galleryMeta, transaction);
+      } else if (files && files.length) {
         const replaceImages = parseBool(body.replaceImages, true);
         await this.attachImages(property.id, files, {
           replace: replaceImages,
@@ -542,7 +692,9 @@ class PropertyService {
       }
     });
 
-    return this.getById(id, req, { allowInactive: true });
+    const updated = await this.getById(id, req, { allowInactive: true });
+    emitPropertyUpdated(updated, 'updated');
+    return updated;
   }
 
   async remove(id) {

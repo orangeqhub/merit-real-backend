@@ -81,7 +81,21 @@ class MapBookingController {
 
   async importSheet(req, res, next) {
     try {
-      const data = await mapBookingService.importSheet(req.body || {});
+      const body = req.body || {};
+      let data;
+      if (Array.isArray(body.phase1) && Array.isArray(body.phase2)) {
+        data = await mapBookingService.importWorkbook({
+          phase1: body.phase1,
+          phase2: body.phase2,
+        });
+      } else if (body.phase1?.rows && body.phase2?.rows) {
+        data = await mapBookingService.importWorkbook({
+          phase1: body.phase1.rows,
+          phase2: body.phase2.rows,
+        });
+      } else {
+        data = await mapBookingService.importSheet(body);
+      }
       return res.json({ success: true, message: 'Sheet imported.', data, errors: data.errors || [] });
     } catch (error) {
       return next(error);

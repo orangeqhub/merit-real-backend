@@ -57,6 +57,17 @@ router.get('/:id', idParamRule, validateRequest, (req, res, next) => {
 });
 
 router.post(
+  '/bulk',
+  authenticate,
+  authorizeRoles(ROLES.ADMIN),
+  createPropertyRules,
+  validateRequest,
+  (req, res, next) => {
+    propertyController.createBulk(req, res, next);
+  }
+);
+
+router.post(
   '/',
   authenticate,
   authorizeRoles(ROLES.ADMIN),

@@ -125,6 +125,21 @@ function emitBookingUpdated(recipients, booking, action = 'updated') {
   emitToRole('SALES_MEMBER', 'booking:updated', payload);
 }
 
+function emitPropertyUpdated(property, action = 'updated') {
+  const payload = buildDomainEnvelope(`property:${action}`, {
+    entityType: 'property',
+    entityId: property?.id,
+    action,
+    property,
+  });
+  emitToRole('ADMIN', 'property:updated', payload);
+  emitToRole('SALES_MEMBER', 'property:updated', payload);
+  if (action === 'created') {
+    emitToRole('ADMIN', 'property:created', payload);
+    emitToRole('SALES_MEMBER', 'property:created', payload);
+  }
+}
+
 module.exports = {
   initRealtime,
   getIo,
@@ -137,4 +152,5 @@ module.exports = {
   emitDomainEvent,
   emitExpressInterestUpdated,
   emitBookingUpdated,
+  emitPropertyUpdated,
 };

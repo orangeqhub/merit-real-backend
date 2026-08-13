@@ -135,6 +135,21 @@ class PropertyController {
     }
   }
 
+  async createBulk(req, res, next) {
+    try {
+      const items = Array.isArray(req.body?.items) ? req.body.items : [];
+      const data = await propertyService.createBulk(items, req.user?.id, req);
+      return res.status(data.failed ? 207 : 201).json({
+        success: data.failed === 0,
+        message: `${data.succeeded} of ${data.total} properties created.`,
+        data,
+        errors: data.results.filter((r) => !r.ok).map((r) => r.error),
+      });
+    } catch (error) {
+      return next(error);
+    }
+  }
+
   async update(req, res, next) {
     try {
       const files = req.files || [];

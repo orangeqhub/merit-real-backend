@@ -494,17 +494,45 @@ class MapBookingService {
       err.status = 400;
       throw err;
     }
+    return this._importPhaseRows(phaseNum, rows, null);
+  }
 
+  /**
+   * Import Phase 1 + Phase 2 rows from one workbook in a single transaction.
+   */
+  async importWorkbook({ phase1 = [], phase2 = [] } = {}) {
+    if (!Array.isArray(phase1) || !phase1.length || !Array.isArray(phase2) || !phase2.length) {
+      const err = new Error('Both Phase 1 and Phase 2 row sets are required.');
+      err.status = 400;
+      throw err;
+    }
+
+    return sequelize.transaction(async (transaction) => {
+      const phase1Result = await this._importPhaseRows(1, phase1, transaction);
+      const phase2Result = await this._importPhaseRows(2, phase2, transaction);
+      return {
+        phase1: phase1Result,
+        phase2: phase2Result,
+        updated: phase1Result.updated + phase2Result.updated,
+        skipped: phase1Result.skipped + phase2Result.skipped,
+        totalRows: phase1Result.totalRows + phase2Result.totalRows,
+        errors: [...phase1Result.errors, ...phase2Result.errors].slice(0, 50),
+      };
+    });
+  }
+
+  async _importPhaseRows(phaseNum, rows, transaction) {
     let updated = 0;
     let skipped = 0;
     const errors = [];
     const items = [];
+    const tx = transaction ? { transaction } : {};
 
     for (const raw of rows) {
       const plotNo = String(raw.plotNo ?? raw.plotNumber ?? raw['plot.no'] ?? '').trim();
       if (!plotNo) {
         skipped += 1;
-        errors.push({ plotNo: null, reason: 'Missing plot number' });
+        errors.push({ plotNo: null, reason: 'Missing plot number', phase: phaseNum });
         continue;
       }
 
@@ -515,10 +543,11 @@ class MapBookingService {
           phase: phaseNum,
           plotNo: { [Op.in]: candidates },
         },
+        ...tx,
       });
       if (!row) {
         skipped += 1;
-        errors.push({ plotNo: seriesPlotNo, reason: `Plot not found in phase ${phaseNum}` });
+        errors.push({ plotNo: seriesPlotNo, reason: `Plot not found in phase ${phaseNum}`, phase: phaseNum });
         continue;
       }
 
@@ -543,13 +572,12 @@ class MapBookingService {
       if (total != null) patch.plotCost = total;
       if (plotType !== 'residential') {
         patch.ratePerSqYd = null;
-        // Keep existing cost null for non-sale types unless sheet gave a number
         if (total == null) patch.plotCost = null;
       }
 
-      await row.update(patch);
+      await row.update(patch, tx);
       updated += 1;
-      items.push(formatPlot(await row.reload()));
+      items.push(formatPlot(await row.reload(tx)));
     }
 
     return {
