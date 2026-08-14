@@ -49,6 +49,10 @@ const registerRules = [
     .trim()
     .isLength({ min: 3, max: 40 })
     .withMessage('Agent referral code must be 3–40 characters.'),
+  body('referralAgentId')
+    .optional({ nullable: true, checkFalsy: true })
+    .isInt({ min: 1 })
+    .withMessage('referralAgentId must be a valid agent id.'),
 ];
 
 const loginRules = [
@@ -86,10 +90,20 @@ const updateProfileRules = [
     .trim()
     .isLength({ min: 3, max: 40 })
     .withMessage('Agent referral code must be 3–40 characters.'),
+  body('referralAgentId')
+    .optional({ nullable: true, checkFalsy: true })
+    .isInt({ min: 1 })
+    .withMessage('referralAgentId must be a valid agent id.'),
   body('clearReferralAgent')
     .optional({ nullable: true, checkFalsy: true })
     .isIn([true, false, 'true', 'false', '1', '0', 1, 0])
     .withMessage('clearReferralAgent must be a boolean-like value.'),
+];
+
+const searchReferralAgentsRules = [
+  query('q').optional({ checkFalsy: true }).trim().isLength({ min: 2, max: 120 }),
+  query('search').optional({ checkFalsy: true }).trim().isLength({ min: 2, max: 120 }),
+  query('limit').optional({ checkFalsy: true }).isInt({ min: 1, max: 25 }),
 ];
 
 module.exports = {
@@ -97,4 +111,5 @@ module.exports = {
   loginRules,
   applicationStatusRules,
   updateProfileRules,
+  searchReferralAgentsRules,
 };

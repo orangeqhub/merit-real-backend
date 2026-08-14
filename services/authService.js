@@ -136,6 +136,7 @@ class AuthService {
     panProofPath,
     referralAgentCode,
     agentReferralCode,
+    referralAgentId: referralAgentIdInput,
   }, req = null) {
     const normalizedRole = String(role || '').toUpperCase();
     if (!PUBLIC_ROLES.includes(normalizedRole)) {
@@ -210,17 +211,34 @@ class AuthService {
 
     let referralAgentId = null;
     if (normalizedRole === ROLES.CUSTOMER) {
-      const code = String(referralAgentCode || agentReferralCode || '').trim();
-      if (code) {
-        const expressInterestService = require('./expressInterestService');
-        const agent = await expressInterestService.findAgentByCode(code);
+      const expressInterestService = require('./expressInterestService');
+      if (referralAgentIdInput != null && referralAgentIdInput !== '') {
+        const agent = await User.findOne({
+          where: {
+            id: Number(referralAgentIdInput),
+            role: ROLES.AGENT,
+            status: USER_STATUSES.ACTIVE,
+          },
+        });
         if (!agent) {
-          const err = new Error('Invalid Agent Referral Code.');
+          const err = new Error('Invalid referral agent.');
           err.status = 400;
           err.code = 'INVALID_REFERRAL_AGENT';
           throw err;
         }
         referralAgentId = agent.id;
+      } else {
+        const code = String(referralAgentCode || agentReferralCode || '').trim();
+        if (code) {
+          const agent = await expressInterestService.findAgentByCode(code);
+          if (!agent) {
+            const err = new Error('Invalid Agent Referral Code.');
+            err.status = 400;
+            err.code = 'INVALID_REFERRAL_AGENT';
+            throw err;
+          }
+          referralAgentId = agent.id;
+        }
       }
     }
 

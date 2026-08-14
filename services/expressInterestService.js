@@ -270,6 +270,11 @@ class ExpressInterestService {
   }
 
   async searchAgentsByName(searchText, { limit = 15 } = {}) {
+    return this.searchAgents(searchText, { limit });
+  }
+
+  /** Search active approved agents by name or referral code (memberId). */
+  async searchAgents(searchText, { limit = 15 } = {}) {
     const q = String(searchText || '').trim();
     if (q.length < 2) return [];
 
@@ -277,7 +282,10 @@ class ExpressInterestService {
       where: {
         role: ROLES.AGENT,
         status: USER_STATUSES.ACTIVE,
-        name: { [Op.iLike]: `%${q}%` },
+        [Op.or]: [
+          { name: { [Op.iLike]: `%${q}%` } },
+          { memberId: { [Op.iLike]: `%${q}%` } },
+        ],
       },
       attributes: ['id', 'memberId', 'name', 'agentGrade', 'status'],
       order: [['name', 'ASC']],
@@ -286,8 +294,11 @@ class ExpressInterestService {
 
     return rows.map((agent) => ({
       id: agent.id,
+      agentId: agent.id,
       memberId: agent.memberId,
+      agentName: agent.name,
       name: agent.name,
+      agentReferralCode: agent.memberId,
       agentGrade: agent.agentGrade,
       status: agent.status,
     }));

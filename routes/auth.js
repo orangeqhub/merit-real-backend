@@ -11,6 +11,7 @@ const {
   loginRules,
   applicationStatusRules,
   updateProfileRules,
+  searchReferralAgentsRules,
 } = require('../validations/authValidation');
 
 router.post(
@@ -47,6 +48,10 @@ router.patch('/me', authenticate, updateProfileRules, validateRequest, (req, res
 
 router.get('/application-status', applicationStatusRules, validateRequest, (req, res, next) => {
   authController.applicationStatus(req, res, next);
+});
+
+router.get('/referral-agents/search', searchReferralAgentsRules, validateRequest, (req, res, next) => {
+  authController.searchReferralAgents(req, res, next);
 });
 
 router.post('/logout', authenticate, (req, res, next) => {

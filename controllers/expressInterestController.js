@@ -15,7 +15,7 @@ class ExpressInterestController {
 
   async searchAgents(req, res, next) {
     try {
-      const data = await expressInterestService.searchAgentsByName(req.query.q || req.query.search || '', {
+      const data = await expressInterestService.searchAgents(req.query.q || req.query.search || '', {
         limit: req.query.limit,
       });
       return res.json({ success: true, message: 'Agents fetched.', data, errors: [] });

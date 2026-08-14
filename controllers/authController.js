@@ -114,6 +114,18 @@ class AuthController {
       errors: [],
     });
   }
+
+  async searchReferralAgents(req, res, next) {
+    try {
+      const expressInterestService = require('../services/expressInterestService');
+      const data = await expressInterestService.searchAgents(req.query.q || req.query.search || '', {
+        limit: req.query.limit,
+      });
+      return res.json({ success: true, message: 'Agents fetched.', data, errors: [] });
+    } catch (error) {
+      return next(error);
+    }
+  }
 }
 
 module.exports = new AuthController();
