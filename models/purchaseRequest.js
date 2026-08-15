@@ -52,6 +52,8 @@ module.exports = (sequelize, DataTypes) => {
 
       PurchaseRequest.hasMany(models.SalesHistory, { foreignKey: 'purchaseRequestId', as: 'salesHistory' });
 
+      PurchaseRequest.hasMany(models.SiteVisit, { foreignKey: 'purchaseRequestId', as: 'siteVisits' });
+
     }
 
   }

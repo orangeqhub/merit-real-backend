@@ -28,6 +28,13 @@ async function bootstrapApplication() {
   } catch (err) {
     console.warn('[startup] Booking expiry job not started:', err.message);
   }
+
+  try {
+    const { startSiteVisitReminderJob } = require('../jobs/siteVisitReminderJob');
+    startSiteVisitReminderJob();
+  } catch (err) {
+    console.warn('[startup] Site visit reminder job not started:', err.message);
+  }
 }
 
 module.exports = {

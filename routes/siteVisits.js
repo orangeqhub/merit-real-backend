@@ -14,11 +14,18 @@ const {
   assignRules,
   dropRules,
   validateAgentRules,
+  rescheduleRules,
+  reasonRules,
+  vehicleRules,
+  followUpRules,
+  startRules,
 } = require('../validations/siteVisitValidation');
 
 const ADMIN_SALES = [ROLES.ADMIN, ROLES.SALES_MEMBER];
 const EMPLOYEE_PIPELINE = [ROLES.ADMIN, ROLES.SALES_MEMBER, ROLES.EMPLOYEE];
 const VISIT_READ = [ROLES.ADMIN, ROLES.CUSTOMER, ROLES.AGENT, ROLES.SALES_MEMBER, ROLES.EMPLOYEE];
+const VISIT_PARTICIPANTS = [ROLES.ADMIN, ROLES.CUSTOMER, ROLES.AGENT, ROLES.SALES_MEMBER, ROLES.EMPLOYEE];
+const VISIT_STAFF = [ROLES.ADMIN, ROLES.AGENT, ROLES.SALES_MEMBER, ROLES.EMPLOYEE];
 
 router.get(
   '/agents/validate',
@@ -37,6 +44,15 @@ router.post(
   (req, res, next) => controller.submit(req, res, next)
 );
 
+router.post(
+  '/from-interest/:interestId',
+  authenticate,
+  authorizeRoles(ROLES.CUSTOMER),
+  submitRules,
+  validateRequest,
+  (req, res, next) => controller.submitFromInterest(req, res, next)
+);
+
 router.get(
   '/mine',
   authenticate,
@@ -47,7 +63,7 @@ router.get(
 router.get(
   '/admin',
   authenticate,
-  authorizeRoles(ROLES.ADMIN),
+  authorizeRoles(...ADMIN_SALES),
   (req, res, next) => controller.listAdmin(req, res, next)
 );
 
@@ -131,10 +147,188 @@ router.post(
 router.post(
   '/:id/complete',
   authenticate,
-  authorizeRoles(ROLES.ADMIN, ROLES.AGENT, ROLES.EMPLOYEE),
+  authorizeRoles(...VISIT_STAFF),
   idParam,
   validateRequest,
   (req, res, next) => controller.markCompleted(req, res, next)
+);
+
+router.post(
+  '/:id/reschedule',
+  authenticate,
+  authorizeRoles(...ADMIN_SALES),
+  rescheduleRules,
+  validateRequest,
+  (req, res, next) => controller.reschedule(req, res, next)
+);
+
+router.post(
+  '/:id/request-reschedule',
+  authenticate,
+  authorizeRoles(ROLES.CUSTOMER),
+  rescheduleRules,
+  validateRequest,
+  (req, res, next) => controller.requestReschedule(req, res, next)
+);
+
+router.post(
+  '/:id/confirm',
+  authenticate,
+  authorizeRoles(ROLES.ADMIN),
+  idParam,
+  validateRequest,
+  (req, res, next) => controller.confirm(req, res, next)
+);
+
+router.post(
+  '/:id/approve-vehicle',
+  authenticate,
+  authorizeRoles(...ADMIN_SALES),
+  idParam,
+  validateRequest,
+  (req, res, next) => controller.approveVehicle(req, res, next)
+);
+
+router.post(
+  '/:id/assign-vehicle',
+  authenticate,
+  authorizeRoles(...ADMIN_SALES),
+  vehicleRules,
+  validateRequest,
+  (req, res, next) => controller.assignVehicleCompatible(req, res, next)
+);
+
+router.post(
+  '/:id/reject-vehicle',
+  authenticate,
+  authorizeRoles(...ADMIN_SALES),
+  reasonRules,
+  validateRequest,
+  (req, res, next) => controller.rejectVehicle(req, res, next)
+);
+
+router.post(
+  '/:id/accept-vehicle',
+  authenticate,
+  authorizeRoles(ROLES.CUSTOMER),
+  idParam,
+  validateRequest,
+  (req, res, next) => controller.acceptVehicle(req, res, next)
+);
+
+router.post(
+  '/:id/request-vehicle-change',
+  authenticate,
+  authorizeRoles(ROLES.CUSTOMER),
+  reasonRules,
+  validateRequest,
+  (req, res, next) => controller.requestVehicleChange(req, res, next)
+);
+
+router.post(
+  '/:id/remarks',
+  authenticate,
+  authorizeRoles(...VISIT_PARTICIPANTS),
+  reasonRules,
+  validateRequest,
+  (req, res, next) => controller.remarks(req, res, next)
+);
+
+router.post(
+  '/:id/cancel',
+  authenticate,
+  authorizeRoles(...VISIT_PARTICIPANTS),
+  reasonRules,
+  validateRequest,
+  (req, res, next) => controller.cancel(req, res, next)
+);
+
+router.post(
+  '/:id/no-show',
+  authenticate,
+  authorizeRoles(...VISIT_STAFF),
+  reasonRules,
+  validateRequest,
+  (req, res, next) => controller.noShow(req, res, next)
+);
+
+router.post(
+  '/:id/start',
+  authenticate,
+  authorizeRoles(...VISIT_STAFF),
+  startRules,
+  validateRequest,
+  (req, res, next) => controller.start(req, res, next)
+);
+
+router.post(
+  '/:id/vehicle/request',
+  authenticate,
+  authorizeRoles(...VISIT_PARTICIPANTS),
+  vehicleRules,
+  validateRequest,
+  (req, res, next) => controller.requestVehicle(req, res, next)
+);
+
+router.post(
+  '/:id/vehicle/assign',
+  authenticate,
+  authorizeRoles(...ADMIN_SALES),
+  vehicleRules,
+  validateRequest,
+  (req, res, next) => controller.assignVehicle(req, res, next)
+);
+
+router.patch(
+  '/:id/vehicle',
+  authenticate,
+  authorizeRoles(...VISIT_PARTICIPANTS),
+  vehicleRules,
+  validateRequest,
+  (req, res, next) => controller.updateVehicle(req, res, next)
+);
+
+router.post(
+  '/:id/follow-ups',
+  authenticate,
+  authorizeRoles(...VISIT_STAFF),
+  followUpRules,
+  validateRequest,
+  (req, res, next) => controller.addFollowUp(req, res, next)
+);
+
+router.get(
+  '/:id/follow-ups',
+  authenticate,
+  authorizeRoles(...VISIT_READ),
+  idParam,
+  validateRequest,
+  (req, res, next) => controller.listFollowUps(req, res, next)
+);
+
+router.get(
+  '/:id/history',
+  authenticate,
+  authorizeRoles(...VISIT_READ),
+  idParam,
+  validateRequest,
+  (req, res, next) => controller.listHistory(req, res, next)
+);
+
+router.post(
+  '/:id/purchase',
+  authenticate,
+  authorizeRoles(ROLES.CUSTOMER),
+  idParam,
+  validateRequest,
+  (req, res, next) => controller.postVisitPurchase(req, res, next)
+);
+
+router.post(
+  '/jobs/reminders',
+  authenticate,
+  authorizeRoles(ROLES.ADMIN),
+  (req, res, next) => controller.runReminderJob(req, res, next)
 );
 
 router.post(

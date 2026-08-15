@@ -12,6 +12,7 @@ const {
   PropertyImage,
   PurchaseRequest,
   BookingRequest,
+  SiteVisit,
   MapPlot,
   sequelize,
 } = require('../models');
@@ -55,6 +56,14 @@ class ExpressInterestService {
       },
       { model: PurchaseRequest, as: 'purchaseRequest' },
       { model: BookingRequest, as: 'bookingRequest' },
+      {
+        model: SiteVisit,
+        as: 'siteVisits',
+        attributes: ['id', 'status', 'visitMode', 'visitDate', 'visitTime', 'vehicleStatus'],
+        separate: true,
+        order: [['createdAt', 'DESC']],
+        limit: 1,
+      },
       {
         model: MapPlot,
         as: 'mapPlot',
@@ -104,6 +113,7 @@ class ExpressInterestService {
     const assignedEmployee = r.assignedEmployee || null;
     const referral = r.referralAgent || null;
     const employeeWorkflowStatus = r.employeeWorkflowStatus || 'new';
+    const latestSiteVisit = Array.isArray(r.siteVisits) ? r.siteVisits[0] : null;
 
     const formatted = {
       id: r.id,
@@ -127,6 +137,9 @@ class ExpressInterestService {
       bookingRequestId: r.bookingRequest?.id || null,
       purchaseStatus: r.purchaseRequest?.status ? String(r.purchaseRequest.status).toLowerCase() : null,
       bookingStatus: r.bookingRequest?.status ? String(r.bookingRequest.status).toLowerCase() : null,
+      siteVisitId: latestSiteVisit?.id || null,
+      siteVisitStatus: latestSiteVisit?.status ? String(latestSiteVisit.status).toLowerCase() : null,
+      siteVisit: latestSiteVisit || null,
       remarks: r.remarks,
       message: r.remarks,
       adminRemarks: r.adminRemarks,

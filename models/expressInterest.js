@@ -28,6 +28,7 @@ module.exports = (sequelize, DataTypes) => {
       ExpressInterest.hasMany(models.InternalNote, { foreignKey: 'interestId', as: 'internalNotes' });
       ExpressInterest.hasOne(models.PurchaseRequest, { foreignKey: 'expressInterestId', as: 'purchaseRequest' });
       ExpressInterest.hasOne(models.BookingRequest, { foreignKey: 'expressInterestId', as: 'bookingRequest' });
+      ExpressInterest.hasMany(models.SiteVisit, { foreignKey: 'expressInterestId', as: 'siteVisits' });
     }
   }
 

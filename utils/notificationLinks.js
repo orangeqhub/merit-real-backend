@@ -57,9 +57,26 @@ function purchaseLink(role, purchaseId) {
   }
 }
 
+function siteVisitLink(role, visitId) {
+  switch (String(role || '').toUpperCase()) {
+    case ROLES.AGENT:
+      return withOpenParam('/mediator/visits', visitId);
+    case ROLES.ADMIN:
+      return withOpenParam('/admin/visits', visitId);
+    case ROLES.SALES_MEMBER:
+      return withOpenParam('/sales/visits', visitId);
+    case ROLES.EMPLOYEE:
+      return withOpenParam('/employee/visits', visitId);
+    case ROLES.CUSTOMER:
+    default:
+      return withOpenParam('/buyer/visits', visitId);
+  }
+}
+
 module.exports = {
   withOpenParam,
   expressInterestLink,
   bookingLink,
   purchaseLink,
+  siteVisitLink,
 };

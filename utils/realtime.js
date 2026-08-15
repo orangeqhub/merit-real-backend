@@ -125,6 +125,29 @@ function emitBookingUpdated(recipients, booking, action = 'updated') {
   emitToRole('SALES_MEMBER', 'booking:updated', payload);
 }
 
+function emitSiteVisitUpdated(recipients, siteVisit, action = 'updated') {
+  const payload = buildDomainEnvelope(`site-visit:${action}`, {
+    entityType: 'site_visit',
+    entityId: siteVisit?.id,
+    action,
+    siteVisit,
+    visit: siteVisit,
+  });
+  const seen = new Set();
+  for (const userId of recipients || []) {
+    const id = Number(userId);
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    emitToUser(id, 'site-visit:updated', payload);
+    if (action !== 'updated') {
+      emitToUser(id, `site-visit:${action}`, payload);
+    }
+  }
+  emitToRole('ADMIN', 'site-visit:updated', payload);
+  emitToRole('SALES_MEMBER', 'site-visit:updated', payload);
+  emitToRole('EMPLOYEE', 'site-visit:updated', payload);
+}
+
 function emitPropertyUpdated(property, action = 'updated') {
   const payload = buildDomainEnvelope(`property:${action}`, {
     entityType: 'property',
@@ -152,5 +175,6 @@ module.exports = {
   emitDomainEvent,
   emitExpressInterestUpdated,
   emitBookingUpdated,
+  emitSiteVisitUpdated,
   emitPropertyUpdated,
 };
