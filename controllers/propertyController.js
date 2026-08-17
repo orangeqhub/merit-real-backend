@@ -207,6 +207,20 @@ class PropertyController {
       return next(error);
     }
   }
+
+  async getCityCounts(req, res, next) {
+    try {
+      const data = await propertyService.getCityCounts();
+      return res.json({
+        success: true,
+        message: 'City property counts fetched.',
+        data,
+        errors: [],
+      });
+    } catch (error) {
+      return next(error);
+    }
+  }
 }
 
 module.exports = new PropertyController();

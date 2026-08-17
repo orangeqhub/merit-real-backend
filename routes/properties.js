@@ -32,6 +32,10 @@ router.get('/trending', (req, res, next) => {
   propertyController.getTrending(req, res, next);
 });
 
+router.get('/city-counts', (req, res, next) => {
+  propertyController.getCityCounts(req, res, next);
+});
+
 /** Admin full list */
 router.get(
   '/admin/all',

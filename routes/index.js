@@ -16,6 +16,7 @@ router.use('/auth', authRoutes);
 router.use('/agent-categories', agentCategoryRoutes);
 router.use('/hero-slides', heroSlideRoutes);
 router.use('/site-settings', require('./siteSettings'));
+router.use('/cms', require('./cms'));
 router.use('/contact-enquiries', require('./contactEnquiries'));
 router.use('/promotions', require('./promotions'));
 router.use('/registrations', registrationRoutes);

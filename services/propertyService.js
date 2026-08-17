@@ -713,6 +713,24 @@ class PropertyService {
     await property.destroy();
     return true;
   }
+
+  async getCityCounts() {
+    const results = await Property.findAll({
+      attributes: ['city', [sequelize.fn('COUNT', sequelize.col('Property.id')), 'count']],
+      where: {
+        status: { [Op.in]: ['ACTIVE', 'BOOKED'] },
+        city: { [Op.ne]: null, [Op.ne]: '' },
+      },
+      group: ['city'],
+      order: [[sequelize.fn('COUNT', sequelize.col('Property.id')), 'DESC']],
+      raw: true,
+    });
+
+    return results.map((r) => ({
+      city: r.city,
+      count: Number(r.count) || 0,
+    }));
+  }
 }
 
 module.exports = new PropertyService();
