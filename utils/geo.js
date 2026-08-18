@@ -41,8 +41,14 @@ function parseMapLocation(value) {
 
 function getPropertyCoordinates(property) {
   if (!property) return null;
+  // Prefer dedicated latitude/longitude columns
+  const lat = property.latitude != null ? Number(property.latitude) : null;
+  const lng = property.longitude != null ? Number(property.longitude) : null;
+  if (Number.isFinite(lat) && Number.isFinite(lng)) return { lat, lng };
+  // Fall back to parsing mapLocation string
   const fromMap = parseMapLocation(property.mapLocation);
   if (fromMap) return fromMap;
+  // Fall back to city centroid
   const city = property.city ? String(property.city).trim() : '';
   if (city && CITY_COORDINATES[city]) return CITY_COORDINATES[city];
   return null;
@@ -51,7 +57,6 @@ function getPropertyCoordinates(property) {
 function applyNearbyFilter(items, latitude, longitude, radiusKm = DEFAULT_RADIUS_KM, detectedCity) {
   const lat = Number(latitude);
   const lng = Number(longitude);
-  const radius = Number(radiusKm) || DEFAULT_RADIUS_KM;
   if (!Number.isFinite(lat) || !Number.isFinite(lng)) return items;
 
   const cityKey = detectedCity ? String(detectedCity).trim().toLowerCase() : '';
@@ -64,13 +69,8 @@ function applyNearbyFilter(items, latitude, longitude, radiusKm = DEFAULT_RADIUS
     return distanceKm != null ? { ...item, distanceKm: Number(distanceKm.toFixed(2)) } : item;
   });
 
-  const inRadius = enriched.filter((item) => {
-    if (item.distanceKm != null) return item.distanceKm <= radius;
-    if (cityKey) return String(item.city || '').trim().toLowerCase() === cityKey;
-    return false;
-  });
-
-  inRadius.sort((a, b) => {
+  // Sort: same-city first, then by distance, properties without distance last
+  enriched.sort((a, b) => {
     const aCity = cityKey && String(a.city || '').trim().toLowerCase() === cityKey ? 0 : 1;
     const bCity = cityKey && String(b.city || '').trim().toLowerCase() === cityKey ? 0 : 1;
     if (aCity !== bCity) return aCity - bCity;
@@ -79,7 +79,7 @@ function applyNearbyFilter(items, latitude, longitude, radiusKm = DEFAULT_RADIUS
     return aDist - bDist;
   });
 
-  return inRadius;
+  return enriched;
 }
 
 module.exports = {

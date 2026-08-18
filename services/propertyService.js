@@ -146,6 +146,8 @@ class PropertyService {
       locationEn: property.locationEn || '',
       locationTe: property.locationTe || '',
       mapLocation: property.mapLocation || '',
+      latitude: property.latitude != null ? Number(property.latitude) : null,
+      longitude: property.longitude != null ? Number(property.longitude) : null,
       price: Number(property.price) || 0,
       priceNegotiable: Boolean(property.priceNegotiable),
       area: property.area != null && property.area !== '' ? String(property.area) : null,
@@ -222,7 +224,7 @@ class PropertyService {
     }
     if (filters.categoryId) where.categoryId = Number(filters.categoryId);
 
-    if (filters.city && !useGeo) {
+    if (filters.city && !useGeo && !filters.search) {
       where.city = { [Op.iLike]: String(filters.city).trim() };
     }
     if (filters.district) {
@@ -256,6 +258,9 @@ class PropertyService {
         { locationEn: { [Op.iLike]: q } },
         { city: { [Op.iLike]: q } },
         { locality: { [Op.iLike]: q } },
+        { mandal: { [Op.iLike]: q } },
+        { district: { [Op.iLike]: q } },
+        { address: { [Op.iLike]: q } },
         { ventureName: { [Op.iLike]: q } },
       ];
     }
@@ -529,6 +534,8 @@ class PropertyService {
       locationEn: buildLocationEn({ ...body, city: body.city || body.cityVillage }),
       locationTe: body.locationTe || '',
       mapLocation: body.mapLocation || '',
+      latitude: body.latitude != null && body.latitude !== '' ? Number(body.latitude) : null,
+      longitude: body.longitude != null && body.longitude !== '' ? Number(body.longitude) : null,
       price: Number(body.price) || 0,
       priceNegotiable: parseBool(body.priceNegotiable, false),
       area: body.area !== undefined && body.area !== '' ? String(body.area).trim() : null,

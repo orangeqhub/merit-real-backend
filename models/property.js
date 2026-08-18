@@ -66,6 +66,14 @@ module.exports = (sequelize, DataTypes) => {
     locationEn: DataTypes.STRING(400),
     locationTe: DataTypes.STRING(400),
     mapLocation: DataTypes.STRING(400),
+    latitude: {
+      type: DataTypes.DECIMAL(10, 7),
+      allowNull: true,
+    },
+    longitude: {
+      type: DataTypes.DECIMAL(10, 7),
+      allowNull: true,
+    },
     price: {
       type: DataTypes.DECIMAL(14, 2),
       allowNull: false,
