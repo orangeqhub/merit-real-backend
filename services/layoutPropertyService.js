@@ -47,9 +47,9 @@ class LayoutPropertyService {
       return property;
     }
 
-    let category = await PropertyCategory.findOne({ where: { slug: 'venture-plot' } });
+    let category = await PropertyCategory.findOne({ where: { slug: 'open-plot' } });
     if (!category) {
-      category = await PropertyCategory.findOne({ where: { slug: 'residential-plot' } });
+      category = await PropertyCategory.findOne({ where: { slug: 'agricultural-land' } });
     }
     if (!category) {
       category = await PropertyCategory.findOne({ order: [['id', 'ASC']] });

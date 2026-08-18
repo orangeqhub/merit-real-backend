@@ -1,10 +1,28 @@
 'use strict';
 
 /**
- * Same split as merit-map-layout/src/utils/plotPhases.js —
- * west twin → phase 1, east twin → phase 2.
+ * Assigns each plot to Phase 1 or Phase 2.
+ *
+ * If the mapping JSON already carries a `phase` field (1 or 2) — derived from
+ * the official PDF layout — those values are used directly.  Otherwise the
+ * function falls back to the original X-coordinate heuristic (west → Phase 1,
+ * east → Phase 2).
  */
 function assignPlotPhases(plots) {
+  const hasExplicitPhases = (plots || []).some(
+    (p) => p.phase === 1 || p.phase === 2
+  );
+
+  if (hasExplicitPhases) {
+    return (plots || [])
+      .filter((p) => p.phase === 1 || p.phase === 2)
+      .map((p) => ({ ...p, phase: p.phase }))
+      .sort((a, b) => {
+        if (a.phase !== b.phase) return a.phase - b.phase;
+        return Number(a.plotNumber) - Number(b.plotNumber);
+      });
+  }
+
   const byNumber = new Map();
   for (const plot of plots || []) {
     const num = Number(plot.plotNumber);
