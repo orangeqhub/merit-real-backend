@@ -27,20 +27,15 @@ const registerRules = [
   body('city').optional({ nullable: true }).trim(),
   body('address').optional({ nullable: true }).trim(),
   body('preferredPropertyType').optional({ nullable: true }).trim(),
-  body('occupation')
-    .trim()
-    .notEmpty()
-    .withMessage('Occupation is required.'),
+  body('occupation').optional({ nullable: true, checkFalsy: true }).trim(),
   body('aadhaarNumber')
+    .optional({ nullable: true, checkFalsy: true })
     .trim()
-    .notEmpty()
-    .withMessage('Aadhaar number is required.')
     .matches(/^\d{12}$/)
     .withMessage('Aadhaar number must be exactly 12 digits.'),
   body('panNumber')
+    .optional({ nullable: true, checkFalsy: true })
     .trim()
-    .notEmpty()
-    .withMessage('PAN number is required.')
     .customSanitizer((value) => String(value || '').toUpperCase())
     .matches(/^[A-Z]{5}[0-9]{4}[A-Z]$/)
     .withMessage('PAN number must follow the format ABCDE1234F.'),
@@ -76,15 +71,7 @@ const updateProfileRules = [
   body('name').optional({ checkFalsy: true }).trim().notEmpty().withMessage('Name is required.'),
   body('email').optional({ checkFalsy: true }).trim().isEmail().withMessage('Valid email is required.'),
   body('address').optional({ nullable: true }).trim(),
-  body('occupation')
-    .optional({ nullable: true })
-    .custom((value) => {
-      if (value === undefined || value === null) return true;
-      if (!String(value).trim()) {
-        throw new Error('Occupation is required.');
-      }
-      return true;
-    }),
+  body('occupation').optional({ nullable: true }).trim(),
   body('referralAgentCode')
     .optional({ nullable: true, checkFalsy: true })
     .trim()

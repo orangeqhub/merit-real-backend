@@ -157,7 +157,7 @@ class AuthService {
     }
 
     const aadhaar = String(aadhaarNumber || '').trim();
-    if (!/^\d{12}$/.test(aadhaar)) {
+    if (aadhaar && !/^\d{12}$/.test(aadhaar)) {
       const err = new Error('Aadhaar number must be exactly 12 digits.');
       err.status = 400;
       err.code = 'INVALID_AADHAAR';
@@ -165,37 +165,17 @@ class AuthService {
     }
 
     const occupationValue = String(occupation || '').trim();
-    if (!occupationValue) {
-      const err = new Error('Occupation is required.');
-      err.status = 400;
-      err.code = 'OCCUPATION_REQUIRED';
-      throw err;
-    }
 
     const pan = String(panNumber || '').trim().toUpperCase();
-    if (!/^[A-Z]{5}[0-9]{4}[A-Z]$/.test(pan)) {
+    if (pan && !/^[A-Z]{5}[0-9]{4}[A-Z]$/.test(pan)) {
       const err = new Error('PAN number must follow the format ABCDE1234F.');
       err.status = 400;
       err.code = 'INVALID_PAN';
       throw err;
     }
 
-    const aadhaarProof = aadhaarProofPath || identityProof;
-    const panProof = panProofPath || addressProof;
-
-    if (!aadhaarProof) {
-      const err = new Error('Aadhaar proof document is required.');
-      err.status = 400;
-      err.code = 'AADHAAR_PROOF_REQUIRED';
-      throw err;
-    }
-
-    if (!panProof) {
-      const err = new Error('PAN proof document is required.');
-      err.status = 400;
-      err.code = 'PAN_PROOF_REQUIRED';
-      throw err;
-    }
+    const aadhaarProof = aadhaarProofPath || identityProof || null;
+    const panProof = panProofPath || addressProof || null;
 
     let resolvedCategoryId = null;
     if (normalizedRole === ROLES.AGENT && agentCategoryId) {
@@ -269,15 +249,15 @@ class AuthService {
       district: district || null,
       city: city || null,
       address: address || null,
-      occupation: occupationValue,
+      occupation: occupationValue || null,
       preferredPropertyType: normalizedRole === ROLES.CUSTOMER
         ? String(preferredPropertyType).trim()
         : null,
       profilePhoto: profilePhoto || null,
       identityProof: aadhaarProof,
       addressProof: panProof,
-      aadhaarNumber: aadhaar,
-      panNumber: pan,
+      aadhaarNumber: aadhaar || null,
+      panNumber: pan || null,
       aadhaarProofPath: aadhaarProof,
       panProofPath: panProof,
       referralAgentId,
@@ -435,13 +415,7 @@ class AuthService {
 
     if (payload.occupation !== undefined) {
       const occupation = String(payload.occupation || '').trim();
-      if (!occupation) {
-        const err = new Error('Occupation is required.');
-        err.status = 400;
-        err.code = 'OCCUPATION_REQUIRED';
-        throw err;
-      }
-      updates.occupation = occupation;
+      updates.occupation = occupation || null;
     }
 
     if (
