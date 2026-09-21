@@ -1,0 +1,102 @@
+'use strict';
+
+const { body, query } = require('express-validator');
+
+const registerRules = [
+  body('name').trim().notEmpty().withMessage('Name is required.'),
+  body('mobile')
+    .trim()
+    .matches(/^\d{10}$/)
+    .withMessage('Mobile must be a 10-digit number.'),
+  body('email').trim().isEmail().withMessage('Valid email is required.'),
+  body('password')
+    .isLength({ min: 6 })
+    .withMessage('Password must be at least 6 characters.'),
+  body('role')
+    .trim()
+    .notEmpty()
+    .withMessage('Role is required.')
+    .customSanitizer((value) => String(value).toLowerCase())
+    .isIn(['customer', 'agent', 'sales_member'])
+    .withMessage('Role must be customer, agent, or sales_member.'),
+  body('agentCategoryId')
+    .optional({ nullable: true, checkFalsy: true })
+    .isInt({ min: 1 })
+    .withMessage('agentCategoryId must be a valid category id.'),
+  body('district').optional({ nullable: true }).trim(),
+  body('city').optional({ nullable: true }).trim(),
+  body('address').optional({ nullable: true }).trim(),
+  body('preferredPropertyType').optional({ nullable: true }).trim(),
+  body('occupation').optional({ nullable: true, checkFalsy: true }).trim(),
+  body('aadhaarNumber')
+    .optional({ nullable: true, checkFalsy: true })
+    .trim()
+    .matches(/^\d{12}$/)
+    .withMessage('Aadhaar number must be exactly 12 digits.'),
+  body('panNumber')
+    .optional({ nullable: true, checkFalsy: true })
+    .trim()
+    .customSanitizer((value) => String(value || '').toUpperCase())
+    .matches(/^[A-Z]{5}[0-9]{4}[A-Z]$/)
+    .withMessage('PAN number must follow the format ABCDE1234F.'),
+  body('referralAgentCode')
+    .optional({ nullable: true, checkFalsy: true })
+    .trim()
+    .isLength({ min: 3, max: 40 })
+    .withMessage('Agent referral code must be 3–40 characters.'),
+  body('referralAgentId')
+    .optional({ nullable: true, checkFalsy: true })
+    .isInt({ min: 1 })
+    .withMessage('referralAgentId must be a valid agent id.'),
+];
+
+const loginRules = [
+  body('password').notEmpty().withMessage('Password is required.'),
+  body().custom((_value, { req }) => {
+    if (!req.body.identifier && !req.body.email && !req.body.mobile) {
+      throw new Error('Provide identifier, email, or mobile.');
+    }
+    return true;
+  }),
+];
+
+const applicationStatusRules = [
+  query('mobile')
+    .trim()
+    .matches(/^\d{10}$/)
+    .withMessage('Mobile must be a 10-digit number.'),
+];
+
+const updateProfileRules = [
+  body('name').optional({ checkFalsy: true }).trim().notEmpty().withMessage('Name is required.'),
+  body('email').optional({ checkFalsy: true }).trim().isEmail().withMessage('Valid email is required.'),
+  body('address').optional({ nullable: true }).trim(),
+  body('occupation').optional({ nullable: true }).trim(),
+  body('referralAgentCode')
+    .optional({ nullable: true, checkFalsy: true })
+    .trim()
+    .isLength({ min: 3, max: 40 })
+    .withMessage('Agent referral code must be 3–40 characters.'),
+  body('referralAgentId')
+    .optional({ nullable: true, checkFalsy: true })
+    .isInt({ min: 1 })
+    .withMessage('referralAgentId must be a valid agent id.'),
+  body('clearReferralAgent')
+    .optional({ nullable: true, checkFalsy: true })
+    .isIn([true, false, 'true', 'false', '1', '0', 1, 0])
+    .withMessage('clearReferralAgent must be a boolean-like value.'),
+];
+
+const searchReferralAgentsRules = [
+  query('q').optional({ checkFalsy: true }).trim().isLength({ min: 2, max: 120 }),
+  query('search').optional({ checkFalsy: true }).trim().isLength({ min: 2, max: 120 }),
+  query('limit').optional({ checkFalsy: true }).isInt({ min: 1, max: 25 }),
+];
+
+module.exports = {
+  registerRules,
+  loginRules,
+  applicationStatusRules,
+  updateProfileRules,
+  searchReferralAgentsRules,
+};
