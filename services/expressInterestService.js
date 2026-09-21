@@ -418,9 +418,30 @@ class ExpressInterestService {
     let propertyId = Number(body.propertyId) || null;
 
     if (mapPlotKey) {
-      const where = /^\d+$/.test(mapPlotKey)
+      const isNumericId = /^\d+$/.test(mapPlotKey);
+      // externalId is only unique per layout, not globally, so a lookup by
+      // externalId must be layout-scoped to avoid matching the wrong
+      // layout's plot when two layouts happen to share an externalId.
+      const layoutKeyInput = String(
+        body.mapPlotLayoutKey || body.layoutKey || body.layout || ''
+      ).trim();
+      if (!isNumericId) {
+        if (!layoutKeyInput) {
+          const err = new Error('layoutKey is required to book a plot.');
+          err.status = 400;
+          err.code = 'LAYOUT_REQUIRED';
+          throw err;
+        }
+        if (!layoutPropertyService.isKnownLayout(layoutKeyInput)) {
+          const err = new Error(`Unknown layout '${layoutKeyInput}'.`);
+          err.status = 400;
+          err.code = 'UNKNOWN_LAYOUT';
+          throw err;
+        }
+      }
+      const where = isNumericId
         ? { id: Number(mapPlotKey) }
-        : { externalId: mapPlotKey };
+        : { externalId: mapPlotKey, layoutKey: layoutKeyInput };
       mapPlot = await MapPlot.findOne({ where });
       if (!mapPlot) {
         const err = new Error('Plot not found.');

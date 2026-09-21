@@ -25,15 +25,19 @@ function layoutForCreate(layout, fallback = null) {
 }
 
 /**
- * Reject write/import calls that carry an explicit but unknown layout key.
- * The list/read APIs intentionally keep an empty scope when no layout is
- * given (backward compatible "no filter" behaviour), but a WRITE must never
- * silently fall back to an unscoped where clause: an unknown or typo'd key
- * would otherwise match rows across every layout by (phase, plotNo).
+ * Reject calls where layout scoping is mandatory: it must be present AND a
+ * known key. Used anywhere a lookup would otherwise be ambiguous across the
+ * 6 layouts (list/search, and any externalId/plotNo lookup — externalId and
+ * plotNo are only unique per layout, not globally).
  */
-function requireKnownLayout(layout) {
+function requireLayout(layout) {
   const raw = layout != null ? String(layout).trim() : '';
-  if (!raw) return;
+  if (!raw) {
+    const err = new Error('layout is required.');
+    err.status = 400;
+    err.code = 'LAYOUT_REQUIRED';
+    throw err;
+  }
   if (!layoutPropertyService.isKnownLayout(raw)) {
     const err = new Error(`Unknown layout '${raw}'.`);
     err.status = 400;
@@ -142,6 +146,7 @@ function truthyFlag(value) {
 
 class MapBookingService {
   async list({ status, propertyId, search, page = 1, pageSize = 100, unique = false, phase, layout } = {}) {
+    requireLayout(layout);
     const where = { ...layoutWhere(layout) };
     if (status) where.status = String(status).toLowerCase();
     if (propertyId) where.propertyId = Number(propertyId);
@@ -184,9 +189,14 @@ class MapBookingService {
   }
 
   async getById(idOrExternal, options = {}) {
+    // plotNo and externalId are only unique per layout, not globally, so any
+    // lookup that isn't a numeric primary key must be layout-scoped.
+    const isNumericId = /^\d+$/.test(String(idOrExternal));
+    const hasPlotNo = options.plotNo != null && String(options.plotNo).trim() !== '';
+    if (hasPlotNo || !isNumericId) requireLayout(options.layout);
     const layoutScope = layoutWhere(options.layout);
     let where;
-    if (options.plotNo != null && String(options.plotNo).trim() !== '') {
+    if (hasPlotNo) {
       // layoutKey + plotNumber lookup (optionally phase-scoped).
       where = {
         ...layoutScope,
@@ -198,7 +208,7 @@ class MapBookingService {
     } else {
       where = {
         ...layoutScope,
-        ...(/^\d+$/.test(String(idOrExternal))
+        ...(isNumericId
           ? { id: Number(idOrExternal) }
           : { externalId: String(idOrExternal) }),
       };
@@ -270,10 +280,12 @@ class MapBookingService {
   }
 
   async book(idOrExternal, body = {}, actor = null, options = {}) {
+    const isNumericId = /^\d+$/.test(String(idOrExternal));
+    if (!isNumericId) requireLayout(options.layout);
     const run = async (transaction) => {
       const where = {
         ...layoutWhere(options.layout),
-        ...(/^\d+$/.test(String(idOrExternal))
+        ...(isNumericId
           ? { id: Number(idOrExternal) }
           : { externalId: String(idOrExternal) }),
       };
@@ -348,9 +360,11 @@ class MapBookingService {
   }
 
   async updateStatus(idOrExternal, body = {}, options = {}) {
+    const isNumericId = /^\d+$/.test(String(idOrExternal));
+    if (!isNumericId) requireLayout(options.layout);
     const where = {
       ...layoutWhere(options.layout),
-      ...(/^\d+$/.test(String(idOrExternal))
+      ...(isNumericId
         ? { id: Number(idOrExternal) }
         : { externalId: String(idOrExternal) }),
     };
@@ -415,7 +429,7 @@ class MapBookingService {
    * Update pricing/details for one plot (and same plotNo within the same phase).
    */
   async updatePricing(payload = {}, options = {}) {
-    requireKnownLayout(options.layout);
+    requireLayout(options.layout);
     const rawId = payload.id != null ? String(payload.id).trim() : '';
     const externalId = payload.externalId != null ? String(payload.externalId).trim() : '';
     const plotNoInput = payload.plotNo != null ? String(payload.plotNo).trim() : '';
@@ -507,7 +521,7 @@ class MapBookingService {
    * - plotCost + plotNos: apply same cost to many plot numbers
    */
   async bulkPricing(payload = {}) {
-    requireKnownLayout(payload.layout);
+    requireLayout(payload.layout);
     let updated = 0;
     const results = [];
     const layoutScope = layoutWhere(payload.layout);
@@ -560,7 +574,7 @@ class MapBookingService {
    * Matches existing MapPlots by (phase, plotNo). Does not create new geometries.
    */
   async importSheet({ phase, rows = [], layout } = {}) {
-    requireKnownLayout(layout);
+    requireLayout(layout);
     const phaseNum = Number(phase) === 2 ? 2 : 1;
     if (!Array.isArray(rows) || !rows.length) {
       const err = new Error('Sheet rows are required.');
@@ -574,7 +588,7 @@ class MapBookingService {
    * Import Phase 1 + Phase 2 rows from one workbook in a single transaction.
    */
   async importWorkbook({ phase1 = [], phase2 = [], layout } = {}) {
-    requireKnownLayout(layout);
+    requireLayout(layout);
     if (!Array.isArray(phase1) || !phase1.length || !Array.isArray(phase2) || !phase2.length) {
       const err = new Error('Both Phase 1 and Phase 2 row sets are required.');
       err.status = 400;
