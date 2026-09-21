@@ -7,9 +7,10 @@ const validateRequest = require('../utils/validateRequest');
 const authenticate = require('../middleware/auth');
 const authorizeRoles = require('../middleware/authorize');
 const { ROLES } = require('../constants/roles');
-const { propertyUpload } = require('../utils/upload');
+const { propertyUpload, propertyDocumentUpload } = require('../utils/upload');
 const {
   idParamRule,
+  documentIdParamRule,
   listPropertyRules,
   createPropertyRules,
   updatePropertyRules,
@@ -59,6 +60,53 @@ router.post('/:id/view', idParamRule, validateRequest, (req, res, next) => {
 router.get('/:id', idParamRule, validateRequest, (req, res, next) => {
   propertyController.getByIdPublic(req, res, next);
 });
+
+/**
+ * Property documents (PDFs). Metadata (filename/size) already travels on the
+ * property payload for public display; these routes gate the actual file.
+ */
+router.get(
+  '/:id/documents',
+  authenticate,
+  idParamRule,
+  validateRequest,
+  (req, res, next) => {
+    propertyController.listDocuments(req, res, next);
+  }
+);
+
+router.get(
+  '/:id/documents/:documentId',
+  authenticate,
+  documentIdParamRule,
+  validateRequest,
+  (req, res, next) => {
+    propertyController.downloadDocument(req, res, next);
+  }
+);
+
+router.post(
+  '/:id/documents',
+  authenticate,
+  authorizeRoles(ROLES.ADMIN),
+  idParamRule,
+  validateRequest,
+  propertyDocumentUpload.array('documents', 10),
+  (req, res, next) => {
+    propertyController.uploadDocuments(req, res, next);
+  }
+);
+
+router.delete(
+  '/:id/documents/:documentId',
+  authenticate,
+  authorizeRoles(ROLES.ADMIN),
+  documentIdParamRule,
+  validateRequest,
+  (req, res, next) => {
+    propertyController.deleteDocument(req, res, next);
+  }
+);
 
 router.post(
   '/bulk',

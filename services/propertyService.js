@@ -7,12 +7,14 @@ const {
   Property,
   PropertyCategory,
   PropertyImage,
+  PropertyDocument,
   PropertyAttribute,
   PropertyAttributeValue,
   sequelize,
 } = require('../models');
 const { resolveMediaUrl } = require('../utils/mediaUrl');
 const { applyNearbyFilter, DEFAULT_RADIUS_KM } = require('../utils/geo');
+const { PROPERTY_DOCUMENTS_DIR, isPdfFile } = require('../utils/upload');
 
 let emitPropertyUpdatedFn = null;
 function emitPropertyUpdated(property, action) {
@@ -93,6 +95,7 @@ class PropertyService {
     return [
       { model: PropertyCategory, as: 'category' },
       { model: PropertyImage, as: 'images' },
+      { model: PropertyDocument, as: 'documents' },
       {
         model: PropertyAttribute,
         as: 'selectedAttributes',
@@ -112,12 +115,31 @@ class PropertyService {
     };
   }
 
+  /**
+   * Document metadata only — never the physical storage path. The actual file is
+   * only ever reachable through the authenticated download endpoint.
+   */
+  formatDocument(doc) {
+    return {
+      id: doc.id,
+      propertyId: doc.propertyId,
+      fileName: doc.fileName,
+      fileSize: Number(doc.fileSize) || 0,
+      mimeType: doc.mimeType || 'application/pdf',
+      createdAt: doc.createdAt,
+    };
+  }
+
   format(property, req) {
     const category = property.category;
     const images = (property.images || [])
       .slice()
       .sort((a, b) => (a.sortOrder - b.sortOrder) || (a.id - b.id))
       .map((img) => this.formatImage(img, req));
+    const documents = (property.documents || [])
+      .slice()
+      .sort((a, b) => a.id - b.id)
+      .map((doc) => this.formatDocument(doc));
 
     const selected = property.selectedAttributes || [];
     const specifications = selected
@@ -187,6 +209,7 @@ class PropertyService {
       isAvailable: String(property.status || '').toUpperCase() === 'ACTIVE',
       viewCount: property.viewCount || 0,
       images,
+      documents,
       specifications,
       amenities: amenities.map((a) => a.nameEn),
       amenityItems: amenities,
@@ -289,6 +312,7 @@ class PropertyService {
       include: [
         { model: PropertyCategory, as: 'category' },
         { model: PropertyImage, as: 'images' },
+        { model: PropertyDocument, as: 'documents' },
         {
           model: PropertyAttribute,
           as: 'selectedAttributes',
@@ -501,6 +525,117 @@ class PropertyService {
       sortOrder: index,
     }));
     await PropertyImage.bulkCreate(rows, { transaction });
+  }
+
+  /** Metadata list for the authenticated "list documents" endpoint. */
+  async listDocuments(propertyId) {
+    const property = await Property.findByPk(propertyId);
+    if (!property) {
+      const err = new Error('Property not found.');
+      err.status = 404;
+      err.code = 'PROPERTY_NOT_FOUND';
+      throw err;
+    }
+    const docs = await PropertyDocument.findAll({
+      where: { propertyId },
+      order: [['id', 'ASC']],
+    });
+    return docs.map((doc) => this.formatDocument(doc));
+  }
+
+  /** Admin-only: attach one or more validated PDF uploads to a property. */
+  async uploadDocuments(propertyId, files, userId) {
+    const property = await Property.findByPk(propertyId);
+    if (!property) {
+      for (const file of files || []) {
+        const full = path.join(PROPERTY_DOCUMENTS_DIR, file.filename);
+        if (fs.existsSync(full)) fs.unlinkSync(full);
+      }
+      const err = new Error('Property not found.');
+      err.status = 404;
+      err.code = 'PROPERTY_NOT_FOUND';
+      throw err;
+    }
+
+    if (!files || !files.length) {
+      const err = new Error('At least one PDF file is required.');
+      err.status = 400;
+      throw err;
+    }
+
+    const created = [];
+    try {
+      for (const file of files) {
+        const full = path.join(PROPERTY_DOCUMENTS_DIR, file.filename);
+        if (!isPdfFile(full)) {
+          if (fs.existsSync(full)) fs.unlinkSync(full);
+          const err = new Error(`"${file.originalname}" is not a valid PDF file.`);
+          err.status = 400;
+          throw err;
+        }
+        const doc = await PropertyDocument.create({
+          propertyId: property.id,
+          fileName: file.originalname,
+          storedFileName: file.filename,
+          mimeType: 'application/pdf',
+          fileSize: file.size,
+          uploadedByUserId: userId || null,
+        });
+        created.push(doc);
+      }
+    } catch (error) {
+      // Roll back any files not yet turned into DB records on partial failure.
+      for (const file of files) {
+        const full = path.join(PROPERTY_DOCUMENTS_DIR, file.filename);
+        const persisted = created.some((d) => d.storedFileName === file.filename);
+        if (!persisted && fs.existsSync(full)) fs.unlinkSync(full);
+      }
+      throw error;
+    }
+
+    return created.map((doc) => this.formatDocument(doc));
+  }
+
+  /** Admin-only: remove a document, verifying it belongs to the given property. */
+  async removeDocument(propertyId, documentId) {
+    const doc = await PropertyDocument.findOne({
+      where: { id: documentId, propertyId },
+    });
+    if (!doc) {
+      const err = new Error('Document not found.');
+      err.status = 404;
+      err.code = 'DOCUMENT_NOT_FOUND';
+      throw err;
+    }
+    const full = path.join(PROPERTY_DOCUMENTS_DIR, doc.storedFileName);
+    await doc.destroy();
+    if (fs.existsSync(full)) fs.unlinkSync(full);
+    return true;
+  }
+
+  /**
+   * Resolve a document for streaming to an authenticated viewer, verifying that
+   * the document actually belongs to the requested property (no cross-property
+   * document ID guessing).
+   */
+  async getDocumentForDownload(propertyId, documentId) {
+    const doc = await PropertyDocument.findOne({
+      where: { id: documentId, propertyId },
+    });
+    if (!doc) {
+      const err = new Error('Document not found.');
+      err.status = 404;
+      err.code = 'DOCUMENT_NOT_FOUND';
+      throw err;
+    }
+    const full = path.join(PROPERTY_DOCUMENTS_DIR, doc.storedFileName);
+    if (!fs.existsSync(full)) {
+      const err = new Error('Document file is missing.');
+      err.status = 404;
+      err.code = 'DOCUMENT_FILE_MISSING';
+      throw err;
+    }
+    return { doc, filePath: full };
   }
 
   buildPayload(body, userId) {
@@ -721,6 +856,11 @@ class PropertyService {
 
     for (const img of property.images || []) {
       const full = path.resolve(__dirname, '..', String(img.imagePath).replace(/^\//, ''));
+      if (fs.existsSync(full)) fs.unlinkSync(full);
+    }
+
+    for (const doc of property.documents || []) {
+      const full = path.join(PROPERTY_DOCUMENTS_DIR, doc.storedFileName);
       if (fs.existsSync(full)) fs.unlinkSync(full);
     }
 

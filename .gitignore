@@ -4,3 +4,5 @@ logs/*.log
 uploads/*
 !uploads/.gitkeep
 !logs/.gitkeep
+private-uploads/*
+!private-uploads/.gitkeep

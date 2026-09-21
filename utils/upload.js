@@ -148,6 +148,63 @@ const bankDocsUpload = multer({
   fileFilter: bankDocsFilter,
 });
 
+/**
+ * Property documents (PDFs) are stored OUTSIDE the `uploads/` directory, which is
+ * served publicly via `express.static` in app.js. This directory is never mounted
+ * as static and files are only ever streamed out through an authenticated route.
+ */
+const PROPERTY_DOCUMENTS_DIR = path.resolve(__dirname, '../private-uploads/property-documents');
+
+const propertyDocumentStorage = multer.diskStorage({
+  destination: (_req, _file, cb) => {
+    ensureDir(PROPERTY_DOCUMENTS_DIR);
+    cb(null, PROPERTY_DOCUMENTS_DIR);
+  },
+  filename: (_req, file, cb) => {
+    const uniqueSuffix = `${Date.now()}-${Math.round(Math.random() * 1e9)}`;
+    cb(null, `document-${uniqueSuffix}.pdf`);
+  },
+});
+
+const PROPERTY_DOCUMENT_MAX_SIZE_MB = Number(process.env.PROPERTY_DOCUMENT_MAX_SIZE_MB) || 20;
+
+const propertyDocumentFilter = (_req, file, cb) => {
+  const extOk = path.extname(file.originalname || '').toLowerCase() === '.pdf';
+  const mimeOk = file.mimetype === 'application/pdf';
+  if (extOk && mimeOk) return cb(null, true);
+  const err = new Error('Only PDF files are allowed for property documents.');
+  err.status = 400;
+  err.code = 'INVALID_FILE_TYPE';
+  return cb(err);
+};
+
+const propertyDocumentUpload = multer({
+  storage: propertyDocumentStorage,
+  limits: { fileSize: PROPERTY_DOCUMENT_MAX_SIZE_MB * 1024 * 1024 },
+  fileFilter: propertyDocumentFilter,
+});
+
+/**
+ * Server-side content sniff: confirms the uploaded bytes actually start with the
+ * PDF magic header, since neither the extension nor the client-supplied MIME type
+ * can be trusted on their own.
+ */
+function isPdfFile(filePath) {
+  let fd;
+  try {
+    fd = fs.openSync(filePath, 'r');
+    const buffer = Buffer.alloc(5);
+    const bytesRead = fs.readSync(fd, buffer, 0, 5, 0);
+    return bytesRead === 5 && buffer.toString('utf8') === '%PDF-';
+  } catch {
+    return false;
+  } finally {
+    if (fd !== undefined) {
+      try { fs.closeSync(fd); } catch { /* ignore */ }
+    }
+  }
+}
+
 module.exports = {
   heroUpload,
   registrationUpload,
@@ -155,4 +212,8 @@ module.exports = {
   promotionUpload,
   bookingPaymentUpload,
   bankDocsUpload,
+  propertyDocumentUpload,
+  PROPERTY_DOCUMENTS_DIR,
+  PROPERTY_DOCUMENT_MAX_SIZE_MB,
+  isPdfFile,
 };

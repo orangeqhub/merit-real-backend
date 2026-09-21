@@ -20,6 +20,11 @@ const reorderRules = [
 
 const idParamRule = [param('id').isInt({ min: 1 }).withMessage('Valid id is required')];
 
+const documentIdParamRule = [
+  param('id').isInt({ min: 1 }).withMessage('Valid property id is required'),
+  param('documentId').isInt({ min: 1 }).withMessage('Valid document id is required'),
+];
+
 const listPropertyRules = [
   query('page').optional().isInt({ min: 1 }),
   query('pageSize').optional().isInt({ min: 1, max: 100 }),
@@ -46,6 +51,7 @@ module.exports = {
   updateCategoryRules,
   reorderRules,
   idParamRule,
+  documentIdParamRule,
   listPropertyRules,
   createPropertyRules,
   updatePropertyRules,

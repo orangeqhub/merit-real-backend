@@ -221,6 +221,71 @@ class PropertyController {
       return next(error);
     }
   }
+
+  async listDocuments(req, res, next) {
+    try {
+      const data = await propertyService.listDocuments(req.params.id);
+      return res.json({
+        success: true,
+        message: 'Property documents fetched.',
+        data,
+        errors: [],
+      });
+    } catch (error) {
+      return next(error);
+    }
+  }
+
+  async uploadDocuments(req, res, next) {
+    try {
+      const files = req.files || [];
+      const data = await propertyService.uploadDocuments(req.params.id, files, req.user?.id);
+      return res.status(201).json({
+        success: true,
+        message: 'Documents uploaded.',
+        data,
+        errors: [],
+      });
+    } catch (error) {
+      return next(error);
+    }
+  }
+
+  async deleteDocument(req, res, next) {
+    try {
+      await propertyService.removeDocument(req.params.id, req.params.documentId);
+      return res.json({
+        success: true,
+        message: 'Document deleted.',
+        data: null,
+        errors: [],
+      });
+    } catch (error) {
+      return next(error);
+    }
+  }
+
+  /**
+   * Authenticated view/download. `?mode=inline` opens in-browser; the default is
+   * a forced attachment download. Never reachable without a valid session — the
+   * `authenticate` middleware on this route guarantees req.user is set.
+   */
+  async downloadDocument(req, res, next) {
+    try {
+      const { doc, filePath } = await propertyService.getDocumentForDownload(req.params.id, req.params.documentId);
+      const disposition = req.query.mode === 'inline' ? 'inline' : 'attachment';
+      const safeName = String(doc.fileName || 'document.pdf').replace(/["\r\n]/g, '');
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader(
+        'Content-Disposition',
+        `${disposition}; filename="${safeName}"; filename*=UTF-8''${encodeURIComponent(safeName)}`
+      );
+      res.setHeader('Cache-Control', 'private, no-store');
+      return res.sendFile(filePath);
+    } catch (error) {
+      return next(error);
+    }
+  }
 }
 
 module.exports = new PropertyController();

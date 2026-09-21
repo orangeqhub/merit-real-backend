@@ -17,6 +17,10 @@ module.exports = (sequelize, DataTypes) => {
         foreignKey: 'propertyId',
         as: 'images',
       });
+      Property.hasMany(models.PropertyDocument, {
+        foreignKey: 'propertyId',
+        as: 'documents',
+      });
       Property.belongsToMany(models.PropertyAttribute, {
         through: models.PropertyAttributeValue,
         foreignKey: 'propertyId',
