@@ -25,6 +25,8 @@ class AuthService {
   formatAuthUser(user, req = null) {
     const category = user.agentCategory || null;
     const referral = user.referralAgent || null;
+    const linkedAbp = user.linkedAbp || null;
+    const linkedAbc = user.linkedAbc || null;
     return {
       id: user.id,
       memberId: user.memberId,
@@ -54,6 +56,14 @@ class AuthService {
             memberId: referral.memberId,
             mobile: referral.mobile,
           }
+        : null,
+      linkedAbpId: user.linkedAbpId || null,
+      linkedAbp: linkedAbp
+        ? { id: linkedAbp.id, name: linkedAbp.name, memberId: linkedAbp.memberId, mobile: linkedAbp.mobile }
+        : null,
+      linkedAbcId: user.linkedAbcId || null,
+      linkedAbc: linkedAbc
+        ? { id: linkedAbc.id, name: linkedAbc.name, memberId: linkedAbc.memberId, mobile: linkedAbc.mobile }
         : null,
       status: user.status,
       district: user.district,

@@ -31,6 +31,8 @@ const approveRules = [
     .customSanitizer((value) => String(value).trim().toUpperCase())
     .isIn(AGENT_GRADE_LIST)
     .withMessage(`Grade must be one of: ${AGENT_GRADE_LIST.join(', ')}.`),
+  body('linkedAbpId').optional({ nullable: true, checkFalsy: true }).isInt({ min: 1 }),
+  body('linkedAbcId').optional({ nullable: true, checkFalsy: true }).isInt({ min: 1 }),
 ];
 
 const rejectRules = [

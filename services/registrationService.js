@@ -10,11 +10,17 @@ const {
   USER_STATUSES,
   AGENT_GRADE_LIST,
   AGENT_GRADE_LABELS,
+  AGENT_GRADES,
 } = require('../constants/roles');
+const { resolveBusinessAdvisorLinks } = require('../utils/businessAdvisorLinks');
 
 class RegistrationService {
   userInclude() {
-    return [{ model: AgentCategory, as: 'agentCategory' }];
+    return [
+      { model: AgentCategory, as: 'agentCategory' },
+      { model: User, as: 'linkedAbp', attributes: ['id', 'name', 'memberId', 'mobile'] },
+      { model: User, as: 'linkedAbc', attributes: ['id', 'name', 'memberId', 'mobile'] },
+    ];
   }
 
   normalizeGrade(grade) {
@@ -113,6 +119,15 @@ class RegistrationService {
         throw err;
       }
       updates.agentGrade = grade;
+
+      if (grade === AGENT_GRADES.BA) {
+        const resolved = await resolveBusinessAdvisorLinks({
+          linkedAbpId: options.linkedAbpId,
+          linkedAbcId: options.linkedAbcId,
+        });
+        updates.linkedAbpId = resolved.linkedAbpId;
+        updates.linkedAbcId = resolved.linkedAbcId;
+      }
     }
 
     await user.update(updates);

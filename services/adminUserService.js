@@ -10,8 +10,10 @@ const {
   USER_STATUSES,
   AGENT_GRADE_LIST,
   AGENT_GRADE_LABELS,
+  AGENT_GRADES,
 } = require('../constants/roles');
 const { normalizeEmployeePermissions } = require('../constants/employeePermissions');
+const { resolveBusinessAdvisorLinks } = require('../utils/businessAdvisorLinks');
 
 const STATUS_UI_TO_API = {
   pending: USER_STATUSES.PENDING,
@@ -24,7 +26,11 @@ const STATUS_UI_TO_API = {
 
 class AdminUserService {
   userInclude() {
-    return [{ model: AgentCategory, as: 'agentCategory' }];
+    return [
+      { model: AgentCategory, as: 'agentCategory' },
+      { model: User, as: 'linkedAbp', attributes: ['id', 'name', 'memberId', 'mobile'] },
+      { model: User, as: 'linkedAbc', attributes: ['id', 'name', 'memberId', 'mobile'] },
+    ];
   }
 
   normalizeStatus(status) {
@@ -46,6 +52,11 @@ class AdminUserService {
 
     const status = this.normalizeStatus(filters.status);
     if (status) where.status = status;
+
+    if (role === ROLES.AGENT && (filters.agentGrade || filters.grade)) {
+      const grade = this.normalizeGrade(filters.agentGrade || filters.grade);
+      if (grade) where.agentGrade = grade;
+    }
 
     if (filters.search) {
       const q = `%${String(filters.search).trim()}%`;
@@ -142,6 +153,8 @@ class AdminUserService {
     }
 
     let agentGrade = null;
+    let linkedAbpId = null;
+    let linkedAbcId = null;
     if (role === ROLES.AGENT) {
       agentGrade = this.normalizeGrade(payload.agentGrade || payload.grade);
       if (status === USER_STATUSES.ACTIVE && !agentGrade) {
@@ -151,6 +164,14 @@ class AdminUserService {
         err.status = 400;
         err.code = 'AGENT_GRADE_REQUIRED';
         throw err;
+      }
+      if (agentGrade === AGENT_GRADES.BA) {
+        const resolved = await resolveBusinessAdvisorLinks({
+          linkedAbpId: payload.linkedAbpId,
+          linkedAbcId: payload.linkedAbcId,
+        });
+        linkedAbpId = resolved.linkedAbpId;
+        linkedAbcId = resolved.linkedAbcId;
       }
     }
 
@@ -185,6 +206,8 @@ class AdminUserService {
         ? String(payload.preferredPropertyType).trim()
         : null,
       agentGrade,
+      linkedAbpId,
+      linkedAbcId,
       agentCategoryId: payload.agentCategoryId ? Number(payload.agentCategoryId) : null,
       score: Number.isFinite(scoreValue) ? scoreValue : null,
       permissions: role === ROLES.EMPLOYEE
@@ -259,6 +282,24 @@ class AdminUserService {
         throw err;
       }
       updates.agentGrade = grade;
+    }
+
+    if (role === ROLES.AGENT) {
+      const resolvedGrade = updates.agentGrade !== undefined ? updates.agentGrade : user.agentGrade;
+      if (resolvedGrade === AGENT_GRADES.BA) {
+        if (payload.linkedAbpId !== undefined || payload.linkedAbcId !== undefined || updates.agentGrade === AGENT_GRADES.BA) {
+          const resolved = await resolveBusinessAdvisorLinks({
+            linkedAbpId: payload.linkedAbpId !== undefined ? payload.linkedAbpId : user.linkedAbpId,
+            linkedAbcId: payload.linkedAbcId !== undefined ? payload.linkedAbcId : user.linkedAbcId,
+          });
+          updates.linkedAbpId = resolved.linkedAbpId;
+          updates.linkedAbcId = resolved.linkedAbcId;
+        }
+      } else if (updates.agentGrade !== undefined) {
+        // Grade changed away from Business Advisor — links no longer apply.
+        updates.linkedAbpId = null;
+        updates.linkedAbcId = null;
+      }
     }
 
     if (payload.status != null) {

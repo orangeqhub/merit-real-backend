@@ -494,6 +494,7 @@ class InterestDecisionService {
     const resultId = await sequelize.transaction(async (transaction) => {
       let totalAmount = null;
       let property = null;
+      let mapPlotLayoutKey = null;
 
       if (mapPlotId) {
         const MapPlot = require('../models').MapPlot;
@@ -525,6 +526,7 @@ class InterestDecisionService {
           { mapPlotId }
         );
         totalAmount = plot.plotCost != null ? Number(plot.plotCost) : null;
+        mapPlotLayoutKey = plot.layoutKey;
       } else {
         property = await bookingManagementService.assertPropertyAvailable(interest.propertyId, transaction);
         totalAmount = property.price != null ? Number(property.price) : null;
@@ -584,7 +586,7 @@ class InterestDecisionService {
             remarks,
           },
           customer,
-          { transaction }
+          { transaction, layout: mapPlotLayoutKey }
         );
       } else {
         await bookingManagementService.reserveProperty(interest.propertyId, transaction);

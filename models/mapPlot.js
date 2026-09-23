@@ -13,6 +13,12 @@ module.exports = (sequelize, DataTypes) => {
   }
 
   MapPlot.init({
+    // NOTE: `externalId` still carries a legacy DB-level global UNIQUE constraint
+    // (MapPlots_externalId_key, from before layoutKey existed) in addition to the
+    // composite (externalId, layoutKey) uniqueness below. App logic treats
+    // externalId as unique per-layout only (see mapBookingService.js), so this
+    // legacy global constraint is a latent landmine, not an intentional rule —
+    // it just hasn't collided yet because most layouts prefix their externalId.
     externalId: {
       type: DataTypes.STRING(100),
       allowNull: false,
@@ -60,6 +66,21 @@ module.exports = (sequelize, DataTypes) => {
     sequelize,
     modelName: 'MapPlot',
     tableName: 'MapPlots',
+    indexes: [
+      {
+        name: 'map_plots_external_id_layout_idx',
+        unique: true,
+        fields: ['externalId', 'layoutKey'],
+      },
+      {
+        name: 'map_plots_layout_key_idx',
+        fields: ['layoutKey'],
+      },
+      {
+        name: 'map_plots_phase_plot_no_idx',
+        fields: ['phase', 'plotNo'],
+      },
+    ],
   });
 
   return MapPlot;

@@ -15,6 +15,12 @@ const listRules = [
   query('status').optional({ checkFalsy: true }).trim(),
   query('sortBy').optional({ checkFalsy: true }).isIn(['name', 'email', 'mobile', 'createdAt', 'status', 'memberId']),
   query('sortDir').optional({ checkFalsy: true }).isIn(['ASC', 'DESC', 'asc', 'desc']),
+  query('agentGrade').optional({ checkFalsy: true }).trim()
+    .customSanitizer((v) => String(v).trim().toUpperCase())
+    .isIn(AGENT_GRADE_LIST),
+  query('grade').optional({ checkFalsy: true }).trim()
+    .customSanitizer((v) => String(v).trim().toUpperCase())
+    .isIn(AGENT_GRADE_LIST),
 ];
 
 const permissionsRule = body('permissions')
@@ -50,6 +56,8 @@ const createRules = [
     .customSanitizer((v) => String(v).trim().toUpperCase())
     .isIn(AGENT_GRADE_LIST)
     .withMessage(`Grade must be one of: ${AGENT_GRADE_LIST.join(', ')}.`),
+  body('linkedAbpId').optional({ nullable: true, checkFalsy: true }).isInt({ min: 1 }),
+  body('linkedAbcId').optional({ nullable: true, checkFalsy: true }).isInt({ min: 1 }),
 ];
 
 const updateRules = [
@@ -70,6 +78,8 @@ const updateRules = [
   body('grade').optional({ nullable: true, checkFalsy: true })
     .customSanitizer((v) => String(v).trim().toUpperCase())
     .isIn(AGENT_GRADE_LIST),
+  body('linkedAbpId').optional({ nullable: true, checkFalsy: true }).isInt({ min: 1 }),
+  body('linkedAbcId').optional({ nullable: true, checkFalsy: true }).isInt({ min: 1 }),
 ];
 
 const employeeCreateRules = [

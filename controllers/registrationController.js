@@ -53,7 +53,11 @@ class RegistrationController {
       const data = await registrationService.approve(
         req.params.id,
         req.user,
-        { grade: req.body.grade || req.body.agentGrade },
+        {
+          grade: req.body.grade || req.body.agentGrade,
+          linkedAbpId: req.body.linkedAbpId,
+          linkedAbcId: req.body.linkedAbcId,
+        },
         req
       );
       return res.json({

@@ -38,7 +38,7 @@ const USER_STATUS_LIST = Object.values(USER_STATUSES);
 const AGENT_GRADES = {
   ABP: 'ABP',
   ABC: 'ABC',
-  ABE: 'ABE',
+  BA: 'BA',
 };
 
 const AGENT_GRADE_LIST = Object.values(AGENT_GRADES);
@@ -46,7 +46,18 @@ const AGENT_GRADE_LIST = Object.values(AGENT_GRADES);
 const AGENT_GRADE_LABELS = {
   ABP: 'Area Business Partner (ABP)',
   ABC: 'Area Business Coordinator (ABC)',
-  ABE: 'Area Business Executive (ABE)',
+  BA: 'Business Advisor (BA)',
+};
+
+/**
+ * Fixed commission split (% of the total credited commission) when a closed
+ * deal's agent is a Business Advisor. The BA's linked ABP and ABC each take
+ * their share automatically; a plain ABP/ABC deal still keeps 100%.
+ */
+const AGENT_COMMISSION_SPLIT = {
+  ABP: 20,
+  ABC: 20,
+  BA: 60,
 };
 
 module.exports = {
@@ -59,4 +70,5 @@ module.exports = {
   AGENT_GRADES,
   AGENT_GRADE_LIST,
   AGENT_GRADE_LABELS,
+  AGENT_COMMISSION_SPLIT,
 };

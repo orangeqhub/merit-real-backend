@@ -14,7 +14,7 @@ const {
   ActivityLog,
   sequelize,
 } = require('../models');
-const { ROLES } = require('../constants/roles');
+const { ROLES, AGENT_GRADES, AGENT_COMMISSION_SPLIT } = require('../constants/roles');
 const notificationService = require('./notificationService');
 const { emitWalletUpdate } = require('../utils/realtime');
 const { resolveMediaUrl } = require('../utils/mediaUrl');
@@ -184,9 +184,16 @@ class WalletService {
     const pendingRequests = await WalletRedemptionRequest.count({
       where: { agentId, status: { [Op.in]: ['PENDING', 'APPROVED'] } },
     });
+    const agentUser = await User.findByPk(agentId, { attributes: ['agentGrade'] });
+    const agentGrade = agentUser?.agentGrade || null;
+    // The agent's own applicable commission share -- server-configured
+    // (AGENT_COMMISSION_SPLIT), never computed or trusted from the client.
+    const commissionPercent = agentGrade != null ? (AGENT_COMMISSION_SPLIT[agentGrade] ?? null) : null;
     return this.formatWallet(wallet, {
       totalClosedDeals: closedDeals,
       pendingRedemptionRequests: pendingRequests,
+      agentGrade,
+      commissionPercent,
     });
   }
 
@@ -302,7 +309,15 @@ class WalletService {
       const deal = await ClosedDeal.findByPk(closedDealId, {
         include: [
           { model: User, as: 'customer', attributes: ['id', 'name'] },
-          { model: User, as: 'agent', attributes: ['id', 'name'] },
+          {
+            model: User,
+            as: 'agent',
+            attributes: ['id', 'name', 'agentGrade', 'linkedAbpId', 'linkedAbcId'],
+            include: [
+              { model: User, as: 'linkedAbp', attributes: ['id', 'name'] },
+              { model: User, as: 'linkedAbc', attributes: ['id', 'name'] },
+            ],
+          },
           { model: Property, as: 'property', attributes: ['id', 'titleEn'] },
         ],
         transaction,
@@ -318,43 +333,70 @@ class WalletService {
         ? Number(commissionPercent)
         : (deal.commissionPercent != null ? Number(deal.commissionPercent) : DEFAULT_COMMISSION_PERCENT);
       const saleAmount = money(deal.saleAmount);
-      const amount = commissionAmount != null
+      const totalAmount = commissionAmount != null
         ? money(commissionAmount)
         : Math.round((saleAmount * percent) / 100 * 100) / 100;
-      if (!(amount > 0)) throw fail('Commission amount must be greater than zero.', 400, 'INVALID_AMOUNT');
+      if (!(totalAmount > 0)) throw fail('Commission amount must be greater than zero.', 400, 'INVALID_AMOUNT');
 
-      const wallet = await this.ensureWallet(deal.agentId, { transaction, actorId: adminUser.id });
-      await wallet.reload({ transaction, lock: transaction.LOCK.UPDATE });
+      // A Business Advisor's sale is automatically split with their linked
+      // ABP and ABC (20% / 20% / 60%). Any other agent grade keeps 100%.
+      const recipients = [];
+      if (deal.agent?.agentGrade === AGENT_GRADES.BA) {
+        recipients.push({ agentId: deal.agent.id, role: AGENT_GRADES.BA, sharePercent: AGENT_COMMISSION_SPLIT.BA });
+        if (deal.agent.linkedAbpId) {
+          recipients.push({ agentId: deal.agent.linkedAbpId, role: AGENT_GRADES.ABP, sharePercent: AGENT_COMMISSION_SPLIT.ABP });
+        }
+        if (deal.agent.linkedAbcId) {
+          recipients.push({ agentId: deal.agent.linkedAbcId, role: AGENT_GRADES.ABC, sharePercent: AGENT_COMMISSION_SPLIT.ABC });
+        }
+      } else {
+        recipients.push({ agentId: deal.agentId, role: deal.agent?.agentGrade || null, sharePercent: 100 });
+      }
 
-      const tx = await WalletTransaction.create({
-        transactionCode: nextCode('WTX'),
-        walletId: wallet.id,
-        agentId: deal.agentId,
-        type: TX.COMMISSION_CREDIT,
-        amount,
-        status: 'COMPLETED',
-        closedDealId: deal.id,
-        remarks: remarks || `Commission credit for deal ${deal.dealCode}`,
-        metaJson: {
-          propertyTitle: deal.property?.titleEn || null,
-          customerName: deal.customer?.name || null,
-          commissionPercent: percent,
-          saleAmount,
-        },
-        createdBy: adminUser.id,
-        modifiedBy: adminUser.id,
-      }, { transaction });
+      const creditedShares = [];
+      for (const recipient of recipients) {
+        const shareAmount = Math.round((totalAmount * recipient.sharePercent) / 100 * 100) / 100;
+        if (!(shareAmount > 0)) continue;
 
-      await wallet.update({
-        balance: money(wallet.balance) + amount,
-        totalEarned: money(wallet.totalEarned) + amount,
-        lastCreditAt: new Date(),
-        modifiedBy: adminUser.id,
-      }, { transaction });
+        const wallet = await this.ensureWallet(recipient.agentId, { transaction, actorId: adminUser.id });
+        await wallet.reload({ transaction, lock: transaction.LOCK.UPDATE });
+
+        const shareNote = recipients.length > 1 ? ` (${recipient.role} share, ${recipient.sharePercent}%)` : '';
+        const tx = await WalletTransaction.create({
+          transactionCode: nextCode('WTX'),
+          walletId: wallet.id,
+          agentId: recipient.agentId,
+          type: TX.COMMISSION_CREDIT,
+          amount: shareAmount,
+          status: 'COMPLETED',
+          closedDealId: deal.id,
+          remarks: (remarks || `Commission credit for deal ${deal.dealCode}`) + shareNote,
+          metaJson: {
+            propertyTitle: deal.property?.titleEn || null,
+            customerName: deal.customer?.name || null,
+            commissionPercent: percent,
+            saleAmount,
+            shareRole: recipient.role,
+            sharePercent: recipient.sharePercent,
+            totalCommissionAmount: totalAmount,
+          },
+          createdBy: adminUser.id,
+          modifiedBy: adminUser.id,
+        }, { transaction });
+
+        await wallet.update({
+          balance: money(wallet.balance) + shareAmount,
+          totalEarned: money(wallet.totalEarned) + shareAmount,
+          lastCreditAt: new Date(),
+          modifiedBy: adminUser.id,
+        }, { transaction });
+
+        creditedShares.push({ agentId: recipient.agentId, amount: shareAmount, role: recipient.role, transactionId: tx.id });
+      }
 
       await deal.update({
         commissionPercent: percent,
-        commissionAmount: amount,
+        commissionAmount: totalAmount,
         commissionStatus: 'CREDITED',
         commissionCreditedAt: new Date(),
         commissionCreditedBy: adminUser.id,
@@ -365,30 +407,37 @@ class WalletService {
         entityType: 'closed_deal',
         entityId: deal.id,
         action: 'COMMISSION_CREDITED',
-        details: JSON.stringify({ amount, agentId: deal.agentId, transactionId: tx.id }),
+        details: JSON.stringify({ amount: totalAmount, agentId: deal.agentId, shares: creditedShares }),
         createdBy: adminUser.id,
       }, { transaction }).catch(() => null);
 
-      return { deal, amount };
+      return { deal, amount: totalAmount, shares: creditedShares };
     });
 
-    await notificationService.create({
-      userId: outcome.deal.agentId,
-      userRole: ROLES.AGENT,
-      titleEn: 'Commission Credited',
-      messageEn: `₹${outcome.amount.toLocaleString('en-IN')} commission credited to your wallet for deal ${outcome.deal.dealCode}.`,
-      notificationType: 'wallet_commission_credited',
-      referenceType: 'closed_deal',
-      referenceId: outcome.deal.id,
-      linkPath: '/mediator/wallet',
-      createdBy: adminUser.id,
-    });
+    for (const share of outcome.shares) {
+      await notificationService.create({
+        userId: share.agentId,
+        userRole: ROLES.AGENT,
+        titleEn: 'Commission Credited',
+        messageEn: `₹${share.amount.toLocaleString('en-IN')} commission credited to your wallet for deal ${outcome.deal.dealCode}.`,
+        notificationType: 'wallet_commission_credited',
+        referenceType: 'closed_deal',
+        referenceId: outcome.deal.id,
+        linkPath: '/mediator/wallet',
+        createdBy: adminUser.id,
+      });
+    }
 
-    const wallet = await this.emitWallet(outcome.deal.agentId, 'commission_credited', {
-      sound: 'commission_credited',
-      amount: outcome.amount,
-    });
-    return { wallet, amount: outcome.amount, closedDealId: outcome.deal.id, commissionStatus: 'CREDITED' };
+    let primaryWallet = null;
+    for (const share of outcome.shares) {
+      const summary = await this.emitWallet(share.agentId, 'commission_credited', {
+        sound: 'commission_credited',
+        amount: share.amount,
+      });
+      if (share.agentId === outcome.deal.agentId) primaryWallet = summary;
+    }
+
+    return { wallet: primaryWallet, amount: outcome.amount, closedDealId: outcome.deal.id, commissionStatus: 'CREDITED' };
   }
 
   async manualCredit({ agentId, amount, remarks, incentiveType }, adminUser) {

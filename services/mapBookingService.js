@@ -189,11 +189,12 @@ class MapBookingService {
   }
 
   async getById(idOrExternal, options = {}) {
-    // plotNo and externalId are only unique per layout, not globally, so any
-    // lookup that isn't a numeric primary key must be layout-scoped.
+    // plotNo/externalId collide across layouts, and even a numeric primary key
+    // must not be resolved without confirming which layout the caller expects —
+    // otherwise a bare id can silently return a different layout's plot.
     const isNumericId = /^\d+$/.test(String(idOrExternal));
     const hasPlotNo = options.plotNo != null && String(options.plotNo).trim() !== '';
-    if (hasPlotNo || !isNumericId) requireLayout(options.layout);
+    requireLayout(options.layout);
     const layoutScope = layoutWhere(options.layout);
     let where;
     if (hasPlotNo) {
@@ -276,12 +277,12 @@ class MapBookingService {
       });
     }
 
-    return this.getById(row.id);
+    return this.getById(row.id, { layout: layoutKey });
   }
 
   async book(idOrExternal, body = {}, actor = null, options = {}) {
     const isNumericId = /^\d+$/.test(String(idOrExternal));
-    if (!isNumericId) requireLayout(options.layout);
+    requireLayout(options.layout);
     const run = async (transaction) => {
       const where = {
         ...layoutWhere(options.layout),
@@ -361,7 +362,7 @@ class MapBookingService {
 
   async updateStatus(idOrExternal, body = {}, options = {}) {
     const isNumericId = /^\d+$/.test(String(idOrExternal));
-    if (!isNumericId) requireLayout(options.layout);
+    requireLayout(options.layout);
     const where = {
       ...layoutWhere(options.layout),
       ...(isNumericId
@@ -388,7 +389,7 @@ class MapBookingService {
       bookingRequestId: body.bookingRequestId !== undefined ? body.bookingRequestId : row.bookingRequestId,
       bookedAt: nextStatus === 'available' ? null : (row.bookedAt || new Date()),
     });
-    return this.getById(row.id);
+    return this.getById(row.id, { layout: row.layoutKey });
   }
 
   async seedPlots(items = [], options = {}) {
@@ -510,7 +511,7 @@ class MapBookingService {
       updated: rows.length,
       plotNo,
       phase,
-      items: await Promise.all(rows.map((row) => this.getById(row.id))),
+      items: await Promise.all(rows.map((row) => this.getById(row.id, { layout: row.layoutKey }))),
     };
   }
 
@@ -628,14 +629,27 @@ class MapBookingService {
 
       const seriesPlotNo = toSeriesPlotNo(phaseNum, plotNo);
       const candidates = seriesPlotNoCandidates(phaseNum, plotNo);
-      const row = await MapPlot.findOne({
-        where: {
-          ...layoutScope,
-          phase: phaseNum,
-          plotNo: { [Op.in]: candidates },
-        },
+      // Prefer an exact match on the canonical series plot number first (the
+      // deterministic case). Only fall back to the looser candidate set —
+      // which can in principle match more than one row if a layout has an
+      // unresolved numbering collision — ordered by lowest id (the
+      // originally-seeded/canonical row) so an import can never silently
+      // land on an arbitrary duplicate/placeholder row instead.
+      let row = await MapPlot.findOne({
+        where: { ...layoutScope, phase: phaseNum, plotNo: seriesPlotNo },
         ...tx,
       });
+      if (!row) {
+        row = await MapPlot.findOne({
+          where: {
+            ...layoutScope,
+            phase: phaseNum,
+            plotNo: { [Op.in]: candidates },
+          },
+          order: [['id', 'ASC']],
+          ...tx,
+        });
+      }
       if (!row) {
         skipped += 1;
         errors.push({ plotNo: seriesPlotNo, reason: `Plot not found in phase ${phaseNum}`, phase: phaseNum });

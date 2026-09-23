@@ -24,8 +24,13 @@ function toSeriesPlotNo(phase, plotNo) {
   const n = parsePlotNumber(plotNo);
   if (n == null) return String(plotNo ?? '').trim();
   if (phaseNum === 2) {
-    if (n >= 1 && n <= PHASE2_INTERNAL_MAX) return String(n + PHASE2_OFFSET);
+    // 135-272 is already a valid series number; check this FIRST, since the
+    // legacy internal range (1-138) overlaps it at 135-138 and would
+    // otherwise wrongly re-offset an already-correct series number (e.g.
+    // 136 -> 270 instead of staying 136). Mirrors toInternalPlotNo() below,
+    // which already checks its series-range case first for the same reason.
     if (n >= PHASE2_SERIES_MIN && n <= PHASE2_SERIES_MAX) return String(n);
+    if (n >= 1 && n <= PHASE2_INTERNAL_MAX) return String(n + PHASE2_OFFSET);
   }
   if (n >= 1 && n <= PHASE1_MAX) return String(n);
   return String(n);

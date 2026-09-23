@@ -20,6 +20,14 @@ module.exports = (sequelize, DataTypes) => {
         foreignKey: 'referralAgentId',
         as: 'referralAgent',
       });
+      User.belongsTo(models.User, {
+        foreignKey: 'linkedAbpId',
+        as: 'linkedAbp',
+      });
+      User.belongsTo(models.User, {
+        foreignKey: 'linkedAbcId',
+        as: 'linkedAbc',
+      });
     }
 
     async checkPassword(password) {
@@ -88,6 +96,14 @@ module.exports = (sequelize, DataTypes) => {
     aadhaarProofPath: DataTypes.STRING,
     panProofPath: DataTypes.STRING,
     referralAgentId: {
+      type: DataTypes.INTEGER,
+      allowNull: true,
+    },
+    linkedAbpId: {
+      type: DataTypes.INTEGER,
+      allowNull: true,
+    },
+    linkedAbcId: {
       type: DataTypes.INTEGER,
       allowNull: true,
     },
