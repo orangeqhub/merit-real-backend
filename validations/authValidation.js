@@ -4,6 +4,11 @@ const { body, query } = require('express-validator');
 
 const registerRules = [
   body('name').trim().notEmpty().withMessage('Name is required.'),
+  body('username')
+    .optional({ nullable: true, checkFalsy: true })
+    .trim()
+    .matches(/^[a-zA-Z0-9._]{3,30}$/)
+    .withMessage('Username must be 3–30 characters: letters, numbers, dot or underscore.'),
   body('mobile')
     .trim()
     .matches(/^\d{10}$/)

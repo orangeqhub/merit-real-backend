@@ -71,6 +71,7 @@ class AuthService {
       address: user.address,
       preferredPropertyType: user.preferredPropertyType,
       occupation: user.occupation || null,
+      username: user.username || null,
       profilePhoto: resolveMediaUrl(req, user.profilePhoto),
       identityProof: resolveMediaUrl(req, user.identityProof),
       addressProof: resolveMediaUrl(req, user.addressProof),
@@ -127,6 +128,7 @@ class AuthService {
 
   async register({
     name,
+    username,
     mobile,
     email,
     password,
@@ -232,24 +234,33 @@ class AuthService {
       }
     }
 
-    const existing = await User.findOne({
-      where: {
-        [Op.or]: [
-          { mobile: String(mobile).trim() },
-          { email: String(email).trim().toLowerCase() },
-        ],
-      },
-    });
+    const usernameValue = String(username || '').trim().toLowerCase();
+    const mobileValue = String(mobile).trim();
+    const emailValue = String(email).trim().toLowerCase();
+
+    const duplicateConditions = [{ mobile: mobileValue }, { email: emailValue }];
+    if (usernameValue) duplicateConditions.push({ username: usernameValue });
+    const existing = await User.findOne({ where: { [Op.or]: duplicateConditions } });
 
     if (existing) {
-      const err = new Error('An account with this mobile or email already exists.');
+      let err;
+      if (existing.mobile === mobileValue) {
+        err = new Error('This mobile number is already registered.');
+        err.code = 'DUPLICATE_MOBILE';
+      } else if (String(existing.email || '').toLowerCase() === emailValue) {
+        err = new Error('This email address is already registered.');
+        err.code = 'DUPLICATE_EMAIL';
+      } else {
+        err = new Error('This username is already taken.');
+        err.code = 'DUPLICATE_USERNAME';
+      }
       err.status = 409;
-      err.code = 'DUPLICATE_USER';
       throw err;
     }
 
     const created = await User.create({
       name: String(name).trim(),
+      username: usernameValue || null,
       mobile: String(mobile).trim(),
       email: String(email).trim().toLowerCase(),
       password,

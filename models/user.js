@@ -88,6 +88,11 @@ module.exports = (sequelize, DataTypes) => {
     address: DataTypes.TEXT,
     preferredPropertyType: DataTypes.STRING,
     occupation: DataTypes.STRING,
+    username: {
+      type: DataTypes.STRING(30),
+      allowNull: true,
+      unique: true,
+    },
     profilePhoto: DataTypes.STRING,
     identityProof: DataTypes.STRING,
     addressProof: DataTypes.STRING,
