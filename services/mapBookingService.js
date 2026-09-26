@@ -571,8 +571,10 @@ class MapBookingService {
   }
 
   /**
-   * Import pricing sheet rows for a phase.
-   * Matches existing MapPlots by (phase, plotNo). Does not create new geometries.
+   * Import sheet rows for one phase of a layout (idempotent upsert).
+   * Rows are matched by the verified-geometry externalId when the client
+   * supplies one, otherwise by (layout, phase, plotNo). A row is only CREATED
+   * when it carries such an externalId -- geometry is never invented here.
    */
   async importSheet({ phase, rows = [], layout } = {}) {
     requireLayout(layout);
@@ -582,7 +584,10 @@ class MapBookingService {
       err.status = 400;
       throw err;
     }
-    return this._importPhaseRows(phaseNum, rows, null, layout);
+    const result = await sequelize.transaction((transaction) =>
+      this._importPhaseRows(phaseNum, rows, transaction, layout)
+    );
+    return { ...result, layout: layout || null };
   }
 
   /**
@@ -602,7 +607,9 @@ class MapBookingService {
       return {
         phase1: phase1Result,
         phase2: phase2Result,
+        inserted: phase1Result.inserted + phase2Result.inserted,
         updated: phase1Result.updated + phase2Result.updated,
+        unchanged: phase1Result.unchanged + phase2Result.unchanged,
         skipped: phase1Result.skipped + phase2Result.skipped,
         totalRows: phase1Result.totalRows + phase2Result.totalRows,
         errors: [...phase1Result.errors, ...phase2Result.errors].slice(0, 50),
@@ -612,12 +619,16 @@ class MapBookingService {
   }
 
   async _importPhaseRows(phaseNum, rows, transaction, layout) {
+    let inserted = 0;
     let updated = 0;
+    let unchanged = 0;
     let skipped = 0;
     const errors = [];
     const items = [];
     const tx = transaction ? { transaction } : {};
     const layoutScope = layoutWhere(layout);
+    const layoutKey = layoutForCreate(layout);
+    const seenInSheet = new Set();
 
     for (const raw of rows) {
       const plotNo = String(raw.plotNo ?? raw.plotNumber ?? raw['plot.no'] ?? '').trim();
@@ -629,16 +640,46 @@ class MapBookingService {
 
       const seriesPlotNo = toSeriesPlotNo(phaseNum, plotNo);
       const candidates = seriesPlotNoCandidates(phaseNum, plotNo);
-      // Prefer an exact match on the canonical series plot number first (the
-      // deterministic case). Only fall back to the looser candidate set —
+      // Stable plot identity from the verified map geometry (sent by the admin
+      // import screen for layouts whose geometry has one polygon per plot
+      // number). When present it is the primary match key, so a row whose
+      // stored plotNo drifted (e.g. "67&68" once saved as "6768") is healed
+      // instead of skipped.
+      const externalId = raw.externalId != null ? String(raw.externalId).trim() : '';
+
+      const sheetKey = `${phaseNum}|${seriesPlotNo}`;
+      if (seenInSheet.has(sheetKey)) {
+        skipped += 1;
+        errors.push({ plotNo: seriesPlotNo, reason: 'Duplicate row in workbook (first occurrence kept)', phase: phaseNum });
+        continue;
+      }
+      seenInSheet.add(sheetKey);
+
+      let row = null;
+      if (externalId) {
+        row = await MapPlot.findOne({ where: { ...layoutScope, externalId }, ...tx });
+        if (row && Number(row.phase) !== phaseNum) {
+          skipped += 1;
+          errors.push({
+            plotNo: seriesPlotNo,
+            reason: `Plot ${externalId} belongs to phase ${row.phase}, not phase ${phaseNum}`,
+            phase: phaseNum,
+          });
+          continue;
+        }
+      }
+      // Otherwise prefer an exact match on the canonical series plot number
+      // (the deterministic case). Only fall back to the looser candidate set —
       // which can in principle match more than one row if a layout has an
       // unresolved numbering collision — ordered by lowest id (the
       // originally-seeded/canonical row) so an import can never silently
       // land on an arbitrary duplicate/placeholder row instead.
-      let row = await MapPlot.findOne({
-        where: { ...layoutScope, phase: phaseNum, plotNo: seriesPlotNo },
-        ...tx,
-      });
+      if (!row) {
+        row = await MapPlot.findOne({
+          where: { ...layoutScope, phase: phaseNum, plotNo: seriesPlotNo },
+          ...tx,
+        });
+      }
       if (!row) {
         row = await MapPlot.findOne({
           where: {
@@ -650,10 +691,54 @@ class MapBookingService {
           ...tx,
         });
       }
-      if (!row) {
+
+      // Never let an import give two rows of one layout/phase the same plot
+      // number (how Anne Enclave Phase 2 ended up with two 269-272s).
+      const takenBy = await MapPlot.findOne({
+        where: {
+          ...layoutScope,
+          phase: phaseNum,
+          plotNo: seriesPlotNo,
+          ...(row ? { id: { [Op.ne]: row.id } } : {}),
+        },
+        attributes: ['id', 'externalId'],
+        ...tx,
+      });
+      if (takenBy && (!row || String(row.plotNo) !== seriesPlotNo || Number(row.phase) !== phaseNum)) {
         skipped += 1;
-        errors.push({ plotNo: seriesPlotNo, reason: `Plot not found in phase ${phaseNum}`, phase: phaseNum });
+        errors.push({
+          plotNo: seriesPlotNo,
+          reason: `Plot number already used by another plot (${takenBy.externalId}) in phase ${phaseNum}`,
+          phase: phaseNum,
+        });
         continue;
+      }
+
+      let created = false;
+      if (!row) {
+        if (!externalId) {
+          skipped += 1;
+          errors.push({ plotNo: seriesPlotNo, reason: `Plot not found in phase ${phaseNum}`, phase: phaseNum });
+          continue;
+        }
+        // MapPlots still carries a legacy global UNIQUE on externalId (see
+        // models/mapPlot.js); check first so one bad row can't abort the
+        // whole transaction with a constraint error.
+        const clash = await MapPlot.findOne({ where: { externalId }, attributes: ['id', 'layoutKey'], ...tx });
+        if (clash) {
+          skipped += 1;
+          errors.push({
+            plotNo: seriesPlotNo,
+            reason: `externalId ${externalId} already belongs to layout ${clash.layoutKey}`,
+            phase: phaseNum,
+          });
+          continue;
+        }
+        row = await MapPlot.create(
+          { externalId, layoutKey, plotNo: seriesPlotNo, phase: phaseNum, status: 'available' },
+          tx
+        );
+        created = true;
       }
 
       const plotType = normalizePlotType(raw.plotType ?? raw.rateRaw ?? raw.costPerSqYd);
@@ -706,20 +791,40 @@ class MapBookingService {
         if (total == null) patch.plotCost = null;
       }
 
-      await row.update(patch, tx);
-      updated += 1;
+      if (created) {
+        await row.update(patch, tx);
+        inserted += 1;
+      } else if (patchChangesRow(row, patch)) {
+        await row.update(patch, tx);
+        updated += 1;
+      } else {
+        unchanged += 1;
+        continue;
+      }
       items.push(formatPlot(await row.reload(tx)));
     }
 
     return {
       phase: phaseNum,
+      inserted,
       updated,
+      unchanged,
       skipped,
       totalRows: rows.length,
       errors: errors.slice(0, 50),
       items: items.slice(0, 20),
     };
   }
+}
+
+/** True when applying `patch` would change at least one stored value. */
+function patchChangesRow(row, patch) {
+  return Object.entries(patch).some(([key, next]) => {
+    const current = row.get(key);
+    if (next == null || current == null) return (next ?? null) !== (current ?? null);
+    if (typeof next === 'number') return Number(current) !== next;
+    return String(current) !== String(next);
+  });
 }
 
 function parseLooseNumber(value) {

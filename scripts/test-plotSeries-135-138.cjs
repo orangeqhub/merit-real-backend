@@ -27,6 +27,11 @@ const cases = [
   [2, 139, '139'],
   [2, 200, '200'],
   [2, 272, '272'],
+  // Composite labels (Manjunadha's merged plot) must never be digit-stripped.
+  [1, '67&68', '67&68'],
+  [2, '67&68', '67&68'],
+  [1, ' 12 ', '12'],
+  [2, '136', '136'],
 ];
 
 let failures = 0;

@@ -7,8 +7,16 @@ const PHASE2_SERIES_MIN = 135;
 const PHASE2_SERIES_MAX = 272;
 const PHASE2_INTERNAL_MAX = 138;
 
+/**
+ * Only a purely numeric plot number ("135", 135, "135.0") takes part in the
+ * phase-series conversion. Composite labels such as Manjunadha's merged
+ * "67&68" must pass through untouched -- stripping non-digits used to turn
+ * it into "6768", a plot number that doesn't exist on the map.
+ */
 function parsePlotNumber(value) {
-  const n = Number(String(value ?? '').replace(/[^\d.]/g, ''));
+  const text = String(value ?? '').trim();
+  if (!/^\d+(\.0+)?$/.test(text)) return null;
+  const n = Number(text);
   return Number.isFinite(n) ? n : null;
 }
 

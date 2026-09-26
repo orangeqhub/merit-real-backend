@@ -107,6 +107,10 @@ class MapBookingController {
       } else {
         data = await mapBookingService.importSheet({ ...body, layout });
       }
+      console.log(
+        `[map-import] layout=${layout} user=${req.user?.id ?? '-'} inserted=${data.inserted || 0} ` +
+          `updated=${data.updated || 0} unchanged=${data.unchanged || 0} skipped=${data.skipped || 0}`
+      );
       return res.json({ success: true, message: 'Sheet imported.', data, errors: data.errors || [] });
     } catch (error) {
       return next(error);
