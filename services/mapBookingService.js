@@ -2,7 +2,13 @@
 
 const { Op } = require('sequelize');
 const { MapPlot, Property, User, sequelize } = require('../models');
-const { toSeriesPlotNo, seriesPlotNoCandidates } = require('../utils/plotSeries');
+const {
+  toSeriesPlotNo,
+  toInternalPlotNo,
+  seriesPlotNoCandidates,
+  phase2SheetUsesInternalNumbers,
+  toSeriesPlotNoInSheet,
+} = require('../utils/plotSeries');
 const layoutPropertyService = require('./layoutPropertyService');
 
 const DEFAULT_LAYOUT_KEY = 'anne-enclave';
@@ -629,17 +635,24 @@ class MapBookingService {
     const layoutScope = layoutWhere(layout);
     const layoutKey = layoutForCreate(layout);
     const seenInSheet = new Set();
+    const sheetPlotNo = (raw) => String(raw.plotNo ?? raw.plotNumber ?? raw['plot.no'] ?? '').trim();
+    const internalNumbering = phaseNum === 2 && phase2SheetUsesInternalNumbers(rows.map(sheetPlotNo));
 
     for (const raw of rows) {
-      const plotNo = String(raw.plotNo ?? raw.plotNumber ?? raw['plot.no'] ?? '').trim();
+      const plotNo = sheetPlotNo(raw);
       if (!plotNo) {
         skipped += 1;
         errors.push({ plotNo: null, reason: 'Missing plot number', phase: phaseNum });
         continue;
       }
 
-      const seriesPlotNo = toSeriesPlotNo(phaseNum, plotNo);
-      const candidates = seriesPlotNoCandidates(phaseNum, plotNo);
+      const seriesPlotNo = toSeriesPlotNoInSheet(phaseNum, plotNo, internalNumbering);
+      // Legacy rows may still store Phase 2's 1–138 number; only an unambiguous
+      // one (1–134) is a safe fallback -- 135–138 are also real series numbers.
+      const legacy = phaseNum === 2 ? toInternalPlotNo(2, seriesPlotNo) : null;
+      const candidates = phaseNum === 2
+        ? [...new Set([seriesPlotNo, ...(Number(legacy) <= 134 ? [legacy] : [])])]
+        : seriesPlotNoCandidates(phaseNum, plotNo);
       // Stable plot identity from the verified map geometry (sent by the admin
       // import screen for layouts whose geometry has one polygon per plot
       // number). When present it is the primary match key, so a row whose
@@ -675,8 +688,11 @@ class MapBookingService {
       // originally-seeded/canonical row) so an import can never silently
       // land on an arbitrary duplicate/placeholder row instead.
       if (!row) {
+        // Deterministic among duplicate rows of one plot (same rule the site
+        // uses to pick the row it shows: latest written, then lowest id).
         row = await MapPlot.findOne({
           where: { ...layoutScope, phase: phaseNum, plotNo: seriesPlotNo },
+          order: [['updatedAt', 'DESC'], ['id', 'ASC']],
           ...tx,
         });
       }
@@ -769,12 +785,10 @@ class MapBookingService {
         sold: 'sold',
       };
       const nextStatus = rawStatus ? (statusMap[rawStatus] || null) : null;
-      const rawCustomer =
-        raw.customerName != null
-          ? String(raw.customerName).trim()
-          : raw.customer != null
-            ? String(raw.customer).trim()
-            : '';
+      // A Customer column that is present but blank clears the name (the sheet
+      // is the source of truth); no Customer column leaves it untouched.
+      const customerKey = raw.customerName !== undefined ? 'customerName' : raw.customer !== undefined ? 'customer' : null;
+      const rawCustomer = customerKey ? String(raw[customerKey] ?? '').trim() : '';
 
       const patch = {
         plotType,
@@ -785,17 +799,28 @@ class MapBookingService {
       if (rate != null) patch.ratePerSqYd = rate;
       if (total != null) patch.plotCost = total;
       if (nextStatus) patch.status = nextStatus;
-      if (rawCustomer) patch.customerName = rawCustomer;
+      if (customerKey) patch.customerName = rawCustomer || null;
       if (plotType !== 'residential') {
         patch.ratePerSqYd = null;
         if (total == null) patch.plotCost = null;
       }
 
+      // Older data can hold more than one row for this plot (e.g. Sri Lakshmi's
+      // duplicate-polygon rows); the sheet row applies to all of them so no
+      // stale duplicate can surface on the board or the map.
+      const siblings = created || String(row.plotNo) !== seriesPlotNo
+        ? []
+        : await MapPlot.findAll({
+            where: { ...layoutScope, phase: phaseNum, plotNo: seriesPlotNo, id: { [Op.ne]: row.id } },
+            ...tx,
+          });
+      const stale = [row, ...siblings].filter((r) => patchChangesRow(r, patch));
+
       if (created) {
         await row.update(patch, tx);
         inserted += 1;
-      } else if (patchChangesRow(row, patch)) {
-        await row.update(patch, tx);
+      } else if (stale.length) {
+        for (const r of stale) await r.update(patch, tx);
         updated += 1;
       } else {
         unchanged += 1;

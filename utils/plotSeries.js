@@ -58,6 +58,28 @@ function toInternalPlotNo(phase, plotNo) {
   return String(n);
 }
 
+/**
+ * A Phase 2 sheet numbers its plots either 1–138 (the brochure's own
+ * numbering) or 135–272 (series). 135–138 are valid in both, so a single
+ * number can't tell them apart -- the sheet as a whole decides: any number
+ * from 1 to 134 means the whole sheet uses 1–138 numbering.
+ */
+function phase2SheetUsesInternalNumbers(plotNos = []) {
+  return plotNos.some((value) => {
+    const n = parsePlotNumber(value);
+    return n != null && n >= 1 && n <= PHASE1_MAX;
+  });
+}
+
+/** Series plot number for one sheet row, given how that sheet is numbered. */
+function toSeriesPlotNoInSheet(phase, plotNo, internalNumbering) {
+  if (normalizePhase(phase) === 2 && internalNumbering) {
+    const n = parsePlotNumber(plotNo);
+    if (n != null && n >= 1 && n <= PHASE2_INTERNAL_MAX) return String(n + PHASE2_OFFSET);
+  }
+  return toSeriesPlotNo(phase, plotNo);
+}
+
 function seriesPlotNoCandidates(phase, plotNo) {
   const phaseNum = normalizePhase(phase);
   const raw = String(plotNo ?? '').trim();
@@ -74,4 +96,6 @@ module.exports = {
   toSeriesPlotNo,
   toInternalPlotNo,
   seriesPlotNoCandidates,
+  phase2SheetUsesInternalNumbers,
+  toSeriesPlotNoInSheet,
 };
